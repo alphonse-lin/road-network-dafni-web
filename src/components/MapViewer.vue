@@ -19,6 +19,8 @@
 <IndexPanel
     v-if="activePanel === 'index'"
     @close="closeIndexPanel"
+    @vulnerabilityCalculation="handleVulnerabilityCalculation"
+    @riskCalculation="handleRiskCalculation"
 />
 <TransportationStatisticsPanel
     v-if="showTransportationStatsPanel"
@@ -39,6 +41,11 @@
     :hasDynamicData="hasDynamicData"
     @close="closeStatisticsPanel"
 />
+<IndexStatisticsPanel
+    v-if="showIndexStatsPanel"
+    :analysis-type="indexAnalysisType"
+    @close="closeIndexStatsPanel"
+/>
 </template>
 
 <script>
@@ -53,6 +60,7 @@ import TopologyStatisticsPanel from './TopologyStatisticsPanel.vue'
 import TransportationPanel from './TransportationPanel.vue'
 import TransportationStatisticsPanel from './TransportationStatisticsPanel.vue'
 import IndexPanel from './IndexPanel.vue'
+import IndexStatisticsPanel from './IndexStatisticsPanel.vue'
 
 export default {
     name: 'MapViewer',
@@ -64,7 +72,8 @@ export default {
         StatisticsPanel: TopologyStatisticsPanel,
         TransportationPanel,
         TransportationStatisticsPanel,
-        IndexPanel
+        IndexPanel,
+        IndexStatisticsPanel
     },
     data() {
         return {
@@ -76,7 +85,9 @@ export default {
             hasDynamicData: false,
             showTransportationStatsPanel: false,
             activePanel: null,
-            londonEntity: null
+            londonEntity: null,
+            showIndexStatsPanel: false,
+            indexAnalysisType: 'vulnerability'  // or 'risk'
         }
     },
     mounted() {
@@ -201,6 +212,7 @@ export default {
         closeAllRightPanels() {
             this.showStatisticsPanel = false;
             this.showTransportationStatsPanel = false;
+            this.showIndexStatsPanel = false;
         },
         handleCompute() {
             if (this.activePanel !== 'topology') {
@@ -260,6 +272,21 @@ export default {
         closeIndexPanel() {
             this.activePanel = null;
             this.closeAllRightPanels();
+        },
+        handleVulnerabilityCalculation() {
+            console.log('Handling vulnerability calculation')
+            this.indexAnalysisType = 'vulnerability'
+            this.showIndexStatsPanel = true
+        },
+        
+        handleRiskCalculation() {
+            console.log('Handling risk calculation')
+            this.indexAnalysisType = 'risk'
+            this.showIndexStatsPanel = true
+        },
+        
+        closeIndexStatsPanel() {
+            this.showIndexStatsPanel = false
         }
     },
     computed: {

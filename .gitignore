@@ -21,3 +21,7 @@ pnpm-debug.log*
 *.njsproj
 *.sln
 *.sw?
+*.jar
+*.geojson
+src/assets/sample_data/flooding_output.zip
+backend/prepare/matsim_preparation_jar/config.xml

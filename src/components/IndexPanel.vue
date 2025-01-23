@@ -2,7 +2,7 @@
     <div class="index-panel">
         <div class="panel-header">
             <h2>Region</h2>
-            <h3>Holborn(10km²)</h3>
+            <h3>King’sCross to Farringdon(25km²)</h3>
             <button class="close-btn" @click="$emit('close')">×</button>
         </div>
         
@@ -91,19 +91,21 @@ const transportationSimulation = ref(false)
 const vulnerabilityTimeStep = ref([100, 10000])
 const riskTimeStep = ref([100, 10000])
 
+const emit = defineEmits(['close', 'vulnerabilityCalculation', 'riskCalculation'])
+
 const handleCheckFiles = () => {
     console.log('Checking files...')
 }
 
 const handleVulnerabilityCalculation = () => {
-    console.log('Calculating vulnerability...')
+    console.log('Emitting vulnerability calculation event')
+    emit('vulnerabilityCalculation')
 }
 
 const handleRiskCalculation = () => {
-    console.log('Calculating risk index...')
+    console.log('Emitting risk calculation event')
+    emit('riskCalculation')
 }
-
-defineEmits(['close'])
 </script>
 
 <style scoped>
@@ -130,7 +132,7 @@ defineEmits(['close'])
     margin: 0;
     font-size: 24px;
     color: #333;
-    text-align: center;
+    text-align: left;
 }
 
 .panel-header h3 {
@@ -138,7 +140,7 @@ defineEmits(['close'])
     font-size: 16px;
     color: #666;
     font-weight: normal;
-    text-align: center;
+    text-align: left;
 }
 
 .close-btn {

@@ -149,7 +149,7 @@ export default {
     margin: 0;
     font-size: 24px;
     color: #333;
-    text-align: center;
+    text-align: left;
 }
 
 .panel-header h3 {
@@ -157,7 +157,7 @@ export default {
     font-size: 16px;
     color: #666;
     font-weight: normal;
-    text-align: center;
+    text-align: left;
 }
 
 .close-btn {
@@ -189,7 +189,7 @@ export default {
 .table-section h4 {
     margin: 0 0 10px;
     color: #333;
-    text-align: center;
+    text-align: left;
 }
 
 .congestion-table {
