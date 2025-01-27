@@ -113,12 +113,13 @@ def process_traffic_data(traffic_file: str, start_time: str = "7:00") -> pd.Data
     
     # 选择开始时间后的2小时数据
     time_columns = [col for col in df.columns if col != 'link_id']
-    time_columns = [int(col) for col in time_columns]
+    # 从列名中移除 'traffic_' 前缀并转换为整数
+    time_columns = [int(col.replace('traffic_', '')) for col in time_columns]
     selected_columns = [col for col in time_columns 
                        if start_seconds <= int(col) <= start_seconds + 7200]
     
-    # 选择相关列
-    result_df = df[['link_id'] + [str(col) for col in selected_columns]]
+    # 选择相关列，添加回 'traffic_' 前缀
+    result_df = df[['link_id'] + [f'traffic_{str(col)}' for col in selected_columns]]
     
     return result_df
 

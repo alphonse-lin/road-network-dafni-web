@@ -8,7 +8,7 @@
 ## Run Matsim
 - [generate daily activity chain](./prepare/generateDailyActivityChain.py)
 - [run matsim](./prepare/runMatsim.py)
-- [!!!!!!!!convert data to frontend](./prepare/convertData.py)
+- [convert data to frontend](./prepare/convertData.py)
 
 ## Run risk calculation
 - [merge data from matsim and space syntax](./prepare/mergeData.py)

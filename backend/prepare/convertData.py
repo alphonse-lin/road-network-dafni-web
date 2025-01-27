@@ -51,12 +51,15 @@ def extract_traffic_flow(events_file_path, time_step=450):
         # 创建DataFrame
         df = pd.DataFrame(data, columns=['time_interval', 'link_id', 'count'])
         
-        # 转换为透视表格式
+        # 转换为透视表格式，并在列名前添加traffic_前缀
         pivot_df = df.pivot(
             index='link_id',
             columns='time_interval',
             values='count'
         ).fillna(0)
+        
+        # 重命名列，添加traffic_前缀
+        pivot_df.columns = [f'traffic_{col}' for col in pivot_df.columns]
         
         # 确保所有link_id都存在
         all_links = range(0, pivot_df.index.max() + 1)

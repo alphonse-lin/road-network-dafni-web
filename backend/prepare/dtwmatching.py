@@ -5,9 +5,10 @@ import pandas as pd
 import os
 from collections import Counter
 from itertools import product
+from tqdm import tqdm  # 用于进度条
+from joblib import Parallel, delayed  # 用于并行计算
 
-#TODO: 需要验证
-def dtw_matching(input_csv_path, output_csv_path=None):
+def dtw_matching(input_csv_path, output_csv_path=None, n_jobs=-1):
     """
     对交通流数据进行DTW匹配分析，支持多MC序列组合匹配
     
@@ -17,6 +18,8 @@ def dtw_matching(input_csv_path, output_csv_path=None):
         输入CSV文件的路径
     output_csv_path : str, optional
         输出CSV文件的路径
+    n_jobs : int, optional
+        并行计算的线程数，-1表示使用所有可用的CPU核心
     
     Returns:
     --------
@@ -37,16 +40,14 @@ def dtw_matching(input_csv_path, output_csv_path=None):
     time_points = sorted(list(set([int(col.split('_')[2]) for col in data.columns if col.startswith('MC_')])))
     
     # 获取目标序列的列名（25200-32400）
-    target_columns = [col for col in data.columns if col.isdigit()]
+    target_columns = [col for col in data.columns if col.startswith('traffic_')]
 
     results = []
     
     # 对每一行数据进行处理
-    for row_index in range(len(data)):
+    def process_row(row_index):
         target_sequence = data.iloc[row_index][target_columns].values
         link_id = data.iloc[row_index]['link_id']
-        print(target_sequence)
-        print(link_id)
         
         # 为每个时间点创建可能的MC值列表
         time_series_combinations = []
@@ -58,11 +59,6 @@ def dtw_matching(input_csv_path, output_csv_path=None):
                     mc_values.append(data.iloc[row_index][col_name])
             time_series_combinations.append(mc_values)
         
-        print(time_series_combinations)
-        # 生成所有可能的组合
-        min_distance = float('inf')
-        best_combination = None
-        
         # 使用动态规划方法查找最佳组合
         dp = [{} for _ in range(len(time_points))]
         
@@ -70,11 +66,7 @@ def dtw_matching(input_csv_path, output_csv_path=None):
         for i, value in enumerate(time_series_combinations[0]):
             sequence = np.asarray([float(value)], dtype=np.float64)  # 明确指定类型和格式
             target = np.asarray([float(target_sequence[0])], dtype=np.float64)
-            print("Sequence shape:", sequence.shape)
-            print("Target shape:", target.shape)
-            print("Sequence:", sequence)
-            print("Target:", target)
-            distance, _ = fastdtw(sequence, target, dist=euclidean)
+            distance, _ = fastdtw(sequence, target, dist=2)
             dp[0][i] = (distance, [value])
         
         # 动态规划填充
@@ -87,7 +79,7 @@ def dtw_matching(input_csv_path, output_csv_path=None):
                     prev_distance, prev_sequence = dp[t-1][prev_idx]
                     new_sequence = np.array(prev_sequence + [curr_value]).reshape(-1)  # 确保是1维数组
                     target = target_sequence[:t+1].reshape(-1)  # 确保是1维数组
-                    distance, _ = fastdtw(new_sequence, target, dist=euclidean)
+                    distance, _ = fastdtw(new_sequence, target, dist=2)
                     
                     if distance < min_prev_distance:
                         min_prev_distance = distance
@@ -114,13 +106,16 @@ def dtw_matching(input_csv_path, output_csv_path=None):
         
         # 添加最佳匹配序列
         for i, value in enumerate(best_sequence):
-            result_dict[f'best_value_{time_points[i]}'] = value
+            result_dict[f'MC_{time_points[i]}'] = value
             
         # 添加目标序列
         for i, value in enumerate(target_sequence):
-            result_dict[f'target_{target_columns[i]}'] = value
+            result_dict[f'traffic_{target_columns[i]}'] = value
             
-        results.append(result_dict)
+        return result_dict
+    
+    # 使用并行计算处理每一行数据
+    results = Parallel(n_jobs=n_jobs)(delayed(process_row)(row_index) for row_index in tqdm(range(len(data)), desc="Processing rows"))
     
     # 创建结果DataFrame并保存
     result_df = pd.DataFrame(results)
@@ -128,12 +123,6 @@ def dtw_matching(input_csv_path, output_csv_path=None):
     print(f'DTW匹配分析完成，结果已保存至: {output_csv_path}')
     
     return result_df
-    # try:
-        
-
-    # except Exception as e:
-    #     print(f"处理过程中发生错误: {str(e)}")
-    #     return None
 
 if __name__ == '__main__':
     # 使用示例
@@ -141,4 +130,4 @@ if __name__ == '__main__':
     output_file = r"src\assets\sample_data\output\004_merged_data\dtw_matching_result.csv"  # 可选
     
     # 方式1：指定输入和输出路径
-    result_df = dtw_matching(input_file, output_file)
+    result_df = dtw_matching(input_file, output_file, n_jobs=-1)
