@@ -11,7 +11,6 @@ import warnings
 from pathlib import Path
 import shutil
 
-#TODO: 001_需要验证
 def extract_number(filename):
     """Extract number from filename, return 0 if no number found"""
     match = re.search(r'\d+', filename)
@@ -50,18 +49,21 @@ def create_inundate_map(geojson_path, flood_zip_path, output_dir):
         warnings.filterwarnings('ignore')
         np.set_printoptions(suppress=True)
 
-        # Create output directory if it doesn't exist
+        output_dir=os.path.join(output_dir,"001_inundate_roadnetwork")
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # Extract zip file to temporary directory
         temp_dir = process_zip_file(flood_zip_path)
-        
+        print("unzip done")
         # Load road network data
         road_network = gpd.read_file(geojson_path)
+        print("load road network done")
         
         # Get and sort flood event files
         files = [f for f in os.listdir(temp_dir) if f.endswith('.asc')]
+        
         sorted_files = sorted(files, key=extract_number)
+        print("get flood event files done")
         
         flag_dic = {}
         depth_dic = {}
@@ -79,7 +81,7 @@ def create_inundate_map(geojson_path, flood_zip_path, output_dir):
                 flags = []
                 for i, row in road_network.iterrows():
                     if temp_attr == 'h_0':
-                        ids.append(int(row['id']))
+                        ids.append(int(row['id'])) #如果有问题，大概率是id没有读取到
 
                     road_bounds = row.geometry.bounds
                     minx, miny, maxx, maxy = road_bounds
@@ -111,6 +113,8 @@ def create_inundate_map(geojson_path, flood_zip_path, output_dir):
         depth_df.sort_values(by=['id'], inplace=True, ascending=True)
         depth_path = os.path.join(output_dir, 'depth_sequenced_flooded_roads.csv')
         depth_df.to_csv(depth_path, index=False)
+        print("save to:", flag_path)
+        print("save to:", depth_path)
 
         return {
             'flag_path': flag_path,
@@ -130,8 +134,11 @@ def create_inundate_map(geojson_path, flood_zip_path, output_dir):
             shutil.rmtree(temp_dir)
 
 if __name__ == "__main__":
+    geojson_path=r'src\assets\sample_data\roadnetwork.geojson'
+    flood_zip_path=r'src\assets\sample_data\flooding_output.zip'
+    output_dir=r'src\assets\sample_data\output'
     create_inundate_map(
-        geojson_path='data/road_network.geojson',
-        flood_zip_path='data/flood_event.zip',
-        output_dir='data/output'
+        geojson_path=geojson_path,
+        flood_zip_path=flood_zip_path,
+        output_dir=output_dir
     )

@@ -123,13 +123,14 @@ def run_matsim(input_dir):
         return False
 
 if __name__ == "__main__":
-    # 命令行参数处理
-    if len(sys.argv) < 2:
-        print("Usage: python runMatsim.py <input_dir>")
-        print("Example: python runMatsim.py ./simulation_input")
-        sys.exit(1)
+    # # 命令行参数处理
+    # if len(sys.argv) < 2:
+    #     print("Usage: python runMatsim.py <input_dir>")
+    #     print("Example: python runMatsim.py ./simulation_input")
+    #     sys.exit(1)
         
-    input_dir = sys.argv[1]
+    # input_dir = sys.argv[1]
+    input_dir = r'src\assets\sample_data\output\003_matsim_calculation'
     
     # 执行模拟
     success = run_matsim(input_dir)

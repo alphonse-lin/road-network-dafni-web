@@ -4,104 +4,141 @@ import numpy as np
 import pandas as pd
 import os
 from collections import Counter
+from itertools import product
 
 #TODO: 需要验证
 def dtw_matching(input_csv_path, output_csv_path=None):
     """
-    对交通流数据进行DTW匹配分析
+    对交通流数据进行DTW匹配分析，支持多MC序列组合匹配
     
     Parameters:
     -----------
     input_csv_path : str
-        输入CSV文件的路径，文件应包含link_id和计数数据
+        输入CSV文件的路径
     output_csv_path : str, optional
-        输出CSV文件的路径，如果不指定则使用输入文件路径加上"_dtw_matching.csv"
+        输出CSV文件的路径
     
     Returns:
     --------
     pd.DataFrame
         包含匹配结果的DataFrame
     """
-    try:
-        # 读取csv文件
-        data = pd.read_csv(input_csv_path)
+    # 读取csv文件
+    data = pd.read_csv(input_csv_path)
+    
+    if output_csv_path is None:
+        file_base = os.path.splitext(input_csv_path)[0]
+        output_csv_path = f"{file_base}_dtw_matching.csv"
+
+    # 获取所有MC前缀（1000, 2000, 3000, -1）
+    mc_prefixes = sorted(list(set([col.split('_')[1] for col in data.columns if col.startswith('MC_')])))
+    
+    # 获取所有时间点
+    time_points = sorted(list(set([int(col.split('_')[2]) for col in data.columns if col.startswith('MC_')])))
+    
+    # 获取目标序列的列名（25200-32400）
+    target_columns = [col for col in data.columns if col.isdigit()]
+
+    results = []
+    
+    # 对每一行数据进行处理
+    for row_index in range(len(data)):
+        target_sequence = data.iloc[row_index][target_columns].values
+        link_id = data.iloc[row_index]['link_id']
+        print(target_sequence)
+        print(link_id)
         
-        if output_csv_path is None:
-            # 自动生成输出文件路径
-            file_base = os.path.splitext(input_csv_path)[0]
-            output_csv_path = f"{file_base}_dtw_matching.csv"
-
-        results = []
-        idx_list = []
-        match_list = []
-        best_sequences_df = pd.DataFrame()
-        reference_sequence_df = pd.DataFrame()
-
-        # 循环遍历每一行数据
-        for row_index in range(data.shape[0]):
-            # 获取当前行的参考序列和待匹配的序列
-            reference_data = data.iloc[row_index, list(range(1, 18))]
-            reference_sequence = reference_data.values
-            
-            sequences_indices = [
-                list(range(18, 35)),
-                list(range(35, 52)),
-                list(range(52, 69)),
-                list(range(69, 86)),
-                list(range(86, 103)),
-            ]
-
-            sequences = [data.iloc[row_index, indices].values for indices in sequences_indices]
-
-            # 寻找最佳匹配
-            min_distance = float('inf')
-            best_match_index = -1
-            best_sequence = None
-            
-            for idx, seq in enumerate(sequences):
-                distance, _ = fastdtw(reference_sequence, seq, dist=euclidean)
-                if distance < min_distance:
-                    min_distance = distance
-                    best_match_index = idx
-                    best_sequence = seq
-
-            idx_list.append(data.iloc[row_index]['link_id'])
-            match_list.append(best_match_index)
-            
-            # 保存最佳匹配序列和参考序列
-            temp_df = pd.DataFrame(best_sequence).T
-            best_sequences_df = pd.concat([best_sequences_df, temp_df], ignore_index=True)
-            reference_sequence_df = pd.concat([reference_sequence_df, pd.DataFrame(reference_sequence).T], ignore_index=True)
-
-        # 创建输出DataFrame
-        export_data = pd.DataFrame({
-            'link_id': idx_list,
-            'match_idx': match_list
-        })
-
-        # 设置参考序列的列名
-        reference_sequence_df.columns = data.columns[1:18]
+        # 为每个时间点创建可能的MC值列表
+        time_series_combinations = []
+        for time_point in time_points:
+            mc_values = []
+            for prefix in mc_prefixes:
+                col_name = f'MC_{prefix}_{time_point}'
+                if col_name in data.columns:
+                    mc_values.append(data.iloc[row_index][col_name])
+            time_series_combinations.append(mc_values)
         
-        # 合并所有结果
-        final_export_data = pd.concat([export_data, reference_sequence_df, best_sequences_df], axis=1)
-
+        print(time_series_combinations)
+        # 生成所有可能的组合
+        min_distance = float('inf')
+        best_combination = None
+        
+        # 使用动态规划方法查找最佳组合
+        dp = [{} for _ in range(len(time_points))]
+        
+        # 初始化第一个时间点
+        for i, value in enumerate(time_series_combinations[0]):
+            sequence = np.asarray([float(value)], dtype=np.float64)  # 明确指定类型和格式
+            target = np.asarray([float(target_sequence[0])], dtype=np.float64)
+            print("Sequence shape:", sequence.shape)
+            print("Target shape:", target.shape)
+            print("Sequence:", sequence)
+            print("Target:", target)
+            distance, _ = fastdtw(sequence, target, dist=euclidean)
+            dp[0][i] = (distance, [value])
+        
+        # 动态规划填充
+        for t in range(1, len(time_points)):
+            for curr_idx, curr_value in enumerate(time_series_combinations[t]):
+                min_prev_distance = float('inf')
+                best_prev_sequence = None
+                
+                for prev_idx in dp[t-1]:
+                    prev_distance, prev_sequence = dp[t-1][prev_idx]
+                    new_sequence = np.array(prev_sequence + [curr_value]).reshape(-1)  # 确保是1维数组
+                    target = target_sequence[:t+1].reshape(-1)  # 确保是1维数组
+                    distance, _ = fastdtw(new_sequence, target, dist=euclidean)
+                    
+                    if distance < min_prev_distance:
+                        min_prev_distance = distance
+                        best_prev_sequence = new_sequence.tolist()
+                
+                if best_prev_sequence is not None:
+                    dp[t][curr_idx] = (min_prev_distance, best_prev_sequence)
+        
+        # 找到最佳组合
+        final_min_distance = float('inf')
+        best_sequence = None
+        
+        for idx in dp[-1]:
+            distance, sequence = dp[-1][idx]
+            if distance < final_min_distance:
+                final_min_distance = distance
+                best_sequence = sequence
+        
         # 保存结果
-        final_export_data.to_csv(output_csv_path, index=False)
-        print(f'DTW匹配分析完成，结果已保存至: {output_csv_path}')
+        result_dict = {
+            'link_id': link_id,
+            'dtw_distance': final_min_distance
+        }
         
-        return final_export_data
+        # 添加最佳匹配序列
+        for i, value in enumerate(best_sequence):
+            result_dict[f'best_value_{time_points[i]}'] = value
+            
+        # 添加目标序列
+        for i, value in enumerate(target_sequence):
+            result_dict[f'target_{target_columns[i]}'] = value
+            
+        results.append(result_dict)
+    
+    # 创建结果DataFrame并保存
+    result_df = pd.DataFrame(results)
+    result_df.to_csv(output_csv_path, index=False)
+    print(f'DTW匹配分析完成，结果已保存至: {output_csv_path}')
+    
+    return result_df
+    # try:
+        
 
-    except Exception as e:
-        print(f"处理过程中发生错误: {str(e)}")
-        return None
+    # except Exception as e:
+    #     print(f"处理过程中发生错误: {str(e)}")
+    #     return None
 
 if __name__ == '__main__':
     # 使用示例
-    input_file = "path/to/your/input/link_count.csv"
-    output_file = "path/to/your/output/dtw_matching_result.csv"  # 可选
+    input_file = r"src\assets\sample_data\output\004_merged_data\merged_output.csv"
+    output_file = r"src\assets\sample_data\output\004_merged_data\dtw_matching_result.csv"  # 可选
     
     # 方式1：指定输入和输出路径
     result_df = dtw_matching(input_file, output_file)
-    
-    # 方式2：只指定输入路径，输出文件将自动生成
-    # result_df = dtw_matching(input_file)

@@ -25,3 +25,9 @@ pnpm-debug.log*
 *.geojson
 src/assets/sample_data/flooding_output.zip
 backend/prepare/matsim_preparation_jar/config.xml
+*.dll
+/backend/prepare/topology_calc_csharp/topology_calc/runtimes
+/src/assets/sample_data/output/003_matsim_calculation/output_traffic
+*.csv
+/backend/prepare/topology_calc_csharp
+/src/assets/sample_data/output

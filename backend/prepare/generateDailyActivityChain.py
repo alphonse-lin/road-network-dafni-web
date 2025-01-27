@@ -50,6 +50,8 @@ def generate_daily_activity_chain(input_dir, output_dir):
     bool
         计算是否成功
     """
+    output_dir = os.path.join(output_dir, "003_matsim_calculation")
+    os.makedirs(output_dir, exist_ok=True)
     try:
         # 设置日志记录器
         logger = setup_logger(output_dir)
@@ -60,7 +62,7 @@ def generate_daily_activity_chain(input_dir, output_dir):
         
         # 获取jar文件和index文件的路径
         jar_path = current_dir / "matsim_preparation_jar" / "generate_demand" / "matsim_preparation.jar"
-        index_path = current_dir / "data" / "indexCalculation.xml"
+        index_path = current_dir / "matsim_preparation_jar" / "indexCalculation.xml"
         
         # 确保文件存在
         if not jar_path.exists():
@@ -72,8 +74,8 @@ def generate_daily_activity_chain(input_dir, output_dir):
         input_dir = Path(input_dir)
         if not (input_dir / "building.geojson").exists():
             raise FileNotFoundError(f"找不到building.geojson文件: {input_dir / 'building.geojson'}")
-        if not (input_dir / "network.geojson").exists():
-            raise FileNotFoundError(f"找不到network.geojson文件: {input_dir / 'network.geojson'}")
+        if not (input_dir / "roadnetwork.geojson").exists():
+            raise FileNotFoundError(f"找不到roadnetwork.geojson文件: {input_dir / 'roadnetwork.geojson'}")
             
         # 确保输出目录存在
         output_dir = Path(output_dir)
@@ -129,13 +131,13 @@ def generate_daily_activity_chain(input_dir, output_dir):
 
 if __name__ == "__main__":
     # 命令行参数处理
-    if len(sys.argv) < 3:
-        print("Usage: python generateDailyActivityChain.py <input_dir> <output_dir>")
-        print("Example: python generateDailyActivityChain.py ./input ./output")
-        sys.exit(1)
+    # if len(sys.argv) < 3:
+    #     print("Usage: python generateDailyActivityChain.py <input_dir> <output_dir>")
+    #     print("Example: python generateDailyActivityChain.py ./input ./output")
+    #     sys.exit(1)
         
-    input_dir = sys.argv[1]
-    output_dir = sys.argv[2]
+    input_dir = r'src\assets\sample_data'
+    output_dir = r'src\assets\sample_data\output'
     
     # 执行计算
     success = generate_daily_activity_chain(input_dir, output_dir)
