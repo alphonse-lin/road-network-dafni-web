@@ -18,9 +18,11 @@
         :projectId="projectId"
         @close="closeTransportationPanel"
         @calculate="handleTransportationCalculation"
+        @updateBuildings="handleBuildingsUpdate"
     />
     <IndexPanel
         v-if="activePanel === 'index'"
+        :project-id="projectId"
         @close="closeIndexPanel"
         @vulnerabilityCalculation="handleVulnerabilityCalculation"
         @riskCalculation="handleRiskCalculation"
@@ -65,6 +67,10 @@
     import IndexPanel from './IndexPanel.vue'
     import IndexStatisticsPanel from './IndexStatisticsPanel.vue'
     import { ElMessage } from 'element-plus'
+    import proj4 from 'proj4'
+    
+    // 定义英国国家网格坐标系统 (EPSG:27700)
+    proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs");
     
     export default {
         name: 'MapViewer',
@@ -92,7 +98,8 @@
                 londonEntity: null,
                 showIndexStatsPanel: false,
                 indexAnalysisType: 'vulnerability',
-                projectId: null
+                projectId: null,
+                currentBuildingsDataSource: null
             }
         },
         mounted() {
@@ -436,7 +443,91 @@
             handleProjectIdGenerated(id) {
                 this.projectId = id;
                 console.log('Project ID set in MapViewer:', id);
-            }
+            },
+            // async handleBuildingsUpdate(geojsonData) {
+            //     try {
+            //         console.log('Starting handleBuildingsUpdate');
+
+            //         // 定义坐标转换函数
+            //         const convertCoordinates = (coordinates) => {
+            //             // 如果是多维数组（MultiPolygon 或 Polygon），递归处理
+            //             if (Array.isArray(coordinates[0])) {
+            //                 return coordinates.map(coord => convertCoordinates(coord));
+            //             }
+                        
+            //             // 处理单个坐标点
+            //             if (coordinates.length === 2 && typeof coordinates[0] === 'number' && typeof coordinates[1] === 'number') {
+            //                 const [lon, lat] = proj4('EPSG:27700', 'EPSG:4326', coordinates);
+            //                 return [
+            //                     Number(lon.toFixed(6)),
+            //                     Number(lat.toFixed(6))
+            //                 ];
+            //             }
+
+            //             throw new Error(`Invalid coordinate format: ${JSON.stringify(coordinates)}`);
+            //         };
+
+            //         // 创建新的 GeoJSON 对象，明确指定 WGS84 坐标系统
+            //         const convertedGeojson = {
+            //             type: "FeatureCollection",
+            //             features: geojsonData.features.map(feature => ({
+            //                 type: "Feature",
+            //                 properties: feature.properties,
+            //                 geometry: {
+            //                     type: feature.geometry.type,
+            //                     coordinates: convertCoordinates(feature.geometry.coordinates)
+            //                 }
+            //             }))
+            //         };
+
+            //         // 创建新的数据源
+            //         const dataSource = new Cesium.GeoJsonDataSource('buildings');
+                    
+            //         try {
+            //             // 移除现有的数据源
+            //             if (this.currentBuildingsDataSource) {
+            //                 await this.viewer.dataSources.remove(this.currentBuildingsDataSource);
+            //             }
+
+            //             // 加载新的数据
+            //             await dataSource.load(convertedGeojson, {
+            //                 stroke: new Cesium.Color(1, 0, 0, 1),
+            //                 fill: new Cesium.Color(1, 0, 0, 0.3),
+            //                 strokeWidth: 2,
+            //                 clampToGround: false
+            //             });
+
+            //             // 添加到查看器
+            //             await this.viewer.dataSources.add(dataSource);
+            //             this.currentBuildingsDataSource = dataSource;
+
+            //             // 设置实体样式
+            //             const entities = dataSource.entities.values;
+            //             if (entities && entities.length > 0) {
+            //                 entities.forEach(entity => {
+            //                     if (entity.polygon) {
+            //                         entity.polygon.material = new Cesium.ColorMaterialProperty(
+            //                             new Cesium.Color(1, 0, 0, 0.3)
+            //                         );
+            //                         entity.polygon.outline = true;
+            //                         entity.polygon.outlineColor = new Cesium.ColorMaterialProperty(
+            //                             new Cesium.Color(1, 0, 0, 1)
+            //                         );
+            //                         entity.polygon.outlineWidth = 2;
+            //                     }
+            //                 });
+            //             }
+
+            //         } catch (error) {
+            //             console.error('Error processing buildings GeoJSON:', error);
+            //             ElMessage.error('Error loading buildings GeoJSON data');
+            //         }
+
+            //     } catch (error) {
+            //         console.error('Error in handleBuildingsUpdate:', error);
+            //         ElMessage.error('An error occurred while updating buildings on the map');
+            //     }
+            // }
         },
         computed: {
             showTopologyPanel() {

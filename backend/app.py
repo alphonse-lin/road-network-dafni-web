@@ -311,21 +311,21 @@ def upload_files():
             'message': f'Failed to upload files: {str(e)}'
         }), 500
 
-@app.route('/api/upload-buildings', methods=['POST'])
-def upload_buildings():
+@app.route('/api/upload-building', methods=['POST'])
+def upload_building():
     try:
         project_id = request.form.get('projectId')
         if not project_id:
             return jsonify({'success': False, 'message': 'Project ID is required'}), 400
 
-        if 'buildings' not in request.files:
-            return jsonify({'success': False, 'message': 'No buildings file provided'}), 400
+        if 'building' not in request.files:
+            return jsonify({'success': False, 'message': 'No building file provided'}), 400
 
-        buildings_file = request.files['buildings']
+        buildings_file = request.files['building']
         task_dir, input_dir, output_dir = ensure_task_directories(project_id)
         
         # 保存 buildings 文件
-        buildings_path = input_dir / 'buildings.geojson'
+        buildings_path = input_dir / 'building.geojson'
         buildings_file.save(str(buildings_path))
 
         return jsonify({
@@ -348,9 +348,22 @@ def check_files(project_id):
         return jsonify({
             'hasRoadNetworks': (input_dir / 'roadnetwork.geojson').exists(),
             'hasInundationMap': (input_dir / 'flooding_output.zip').exists(),
-            'hasBuildings': (input_dir / 'buildings.geojson').exists()
+            'hasBuildings': (input_dir / 'building.geojson').exists()
         })
 
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/check-files-2/<project_id>', methods=['GET'])
+def check_calculation_files(project_id):
+    try:
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+        
+        return jsonify({
+            'hasTopologyCalculation': (output_dir / '002_topology_calculation').exists(),
+            'hasMatsimCalculation': (output_dir / '003_matsim_calculation').exists(),
+            'hasMergedData': (output_dir / '004_merged_data').exists()
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

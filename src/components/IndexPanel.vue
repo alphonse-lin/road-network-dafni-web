@@ -2,7 +2,7 @@
     <div class="index-panel">
         <div class="panel-header">
             <h2>Region</h2>
-            <h3>King’sCross to Farringdon(25km²)</h3>
+            <h3>King'sCross to Farringdon(25km²)</h3>
             <button class="close-btn" @click="$emit('close')">×</button>
         </div>
         
@@ -14,20 +14,43 @@
                 </button>
                 
                 <div class="checkbox-group">
-                    <el-checkbox v-model="topologyCalculation">
+                    <el-checkbox v-model="topologyCalculation" disabled>
                         Topology Calculation
-                        <el-icon class="settings-icon"><Setting /></el-icon>
+                        <el-tooltip
+                            content="Topology calculation based on network structure"
+                            placement="right"
+                        >
+                            <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
                     </el-checkbox>
                     
-                    <el-checkbox v-model="transportationSimulation">
+                    <el-checkbox v-model="transportationSimulation" disabled>
                         Transportation Simulation
-                        <el-icon class="settings-icon"><Setting /></el-icon>
+                        <el-tooltip
+                            content="Transportation demand based on simulation"
+                            placement="right"
+                        >
+                            <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
                     </el-checkbox>
                 </div>
             </div>
 
             <div class="index-calculation">
                 <h4>Index Calculation</h4>
+                <div class="slider-container">
+                        <div class="slider-label">
+                            <span>Time Step</span>
+                            <span class="slider-value">{{ vulnerabilityTimeStep }}</span>
+                        </div>
+                        <el-slider 
+                            v-model="vulnerabilityTimeStep" 
+                            :min="100" 
+                            :max="10000" 
+                            :default-value="450"
+                        />
+                        <p class="description">Description</p>
+                </div>
                 
                 <div class="vulnerability-section">
                     <h5>• Vulnerability Calculation</h5>
@@ -35,22 +58,6 @@
                         <img src="@/assets/index_1.jpg" alt="Vulnerability 1" />
                     </div>
                     
-                    <div class="slider-container">
-                        <div class="slider-label">
-                            <span>Time Step</span>
-                            <span class="slider-value">100 - 10000</span>
-                        </div>
-                        <el-slider v-model="vulnerabilityTimeStep" :min="100" :max="10000" range />
-                        <p class="description">Description</p>
-                    </div>
-                    
-                    <el-button 
-                        class="calculation-btn" 
-                        type="primary"
-                        @click="handleVulnerabilityCalculation"
-                    >
-                        Calculation
-                    </el-button>
                 </div>
 
                 <div class="risk-section">
@@ -59,52 +66,109 @@
                         <img src="@/assets/index_2.jpg" alt="Risk 1" />
                     </div>
                     
-                    <div class="slider-container">
+                    <!-- <div class="slider-container">
                         <div class="slider-label">
                             <span>Time Step</span>
-                            <span class="slider-value">100 - 10000</span>
+                            <span class="slider-value">{{ riskTimeStep }}</span>
                         </div>
-                        <el-slider v-model="riskTimeStep" :min="100" :max="10000" range />
+                        <el-slider 
+                            v-model="riskTimeStep" 
+                            :min="100" 
+                            :max="10000" 
+                            :default-value="450"
+                        />
                         <p class="description">Description</p>
+                    </div> -->
+
+                    <div class="button-group">
+                        <el-button 
+                            class="calculation-btn" 
+                            type="primary"
+                            @click="handleVulnerabilityCalculation"
+                            :disabled="!calculationEnabled"
+                        >
+                            Calculation
+                        </el-button>
+
                     </div>
-                    
-                    <el-button 
-                        class="calculation-btn" 
-                        type="primary"
-                        @click="handleRiskCalculation"
-                    >
-                        Calculation
-                    </el-button>
+
+                    <div>
+                        <el-button 
+                            class="view-result-btn" 
+                            type="default"
+                            @click="handleRiskCalculation"
+                            :disabled="!calculationEnabled"
+                        >
+                            View Result
+                        </el-button>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
+    <CalculationProgress
+        v-model:visible="showProgress"
+        :project-id="props.projectId"
+        mode="vulnerability"
+        title="Vulnerability Calculation Progress"
+        @calculation-complete="handleCalculationComplete"
+    />
 </template>
 
 <script setup>
 import { ref } from 'vue'
-import { ElCheckbox, ElSlider, ElButton } from 'element-plus'
-import { Setting } from '@element-plus/icons-vue'
+import { ElCheckbox, ElSlider, ElButton, ElMessage, ElTooltip } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
+import CalculationProgress from './CalculationProgress.vue'
+import axios from 'axios'
+
+const props = defineProps({
+    projectId: {
+        type: String,
+        required: true
+    }
+})
 
 const topologyCalculation = ref(false)
 const transportationSimulation = ref(false)
-const vulnerabilityTimeStep = ref([100, 10000])
-const riskTimeStep = ref([100, 10000])
+const vulnerabilityTimeStep = ref(450)
+// const riskTimeStep = ref(450)
+const showProgress = ref(false)
+const calculationEnabled = ref(false)
 
 const emit = defineEmits(['close', 'vulnerabilityCalculation', 'riskCalculation'])
 
-const handleCheckFiles = () => {
-    console.log('Checking files...')
+const handleCheckFiles = async () => {
+    try {
+        console.log('Checking files for project:', props.projectId)
+        const response = await axios.get(`http://localhost:5000/api/check-files-2/${props.projectId}`)
+        const { hasTopologyCalculation, hasMatsimCalculation, hasMergedData } = response.data
+        
+        if (hasTopologyCalculation && hasMatsimCalculation && hasMergedData) {
+            calculationEnabled.value = true
+            topologyCalculation.value = true
+            transportationSimulation.value = true
+            ElMessage.success('Previous calculations completed')
+        } else {
+            ElMessage.warning('Please complete previous calculations first')
+        }
+    } catch (error) {
+        console.error('Error checking files:', error)
+        ElMessage.error('Failed to check files')
+    }
 }
 
 const handleVulnerabilityCalculation = () => {
-    console.log('Emitting vulnerability calculation event')
-    emit('vulnerabilityCalculation')
+    showProgress.value = true
 }
 
 const handleRiskCalculation = () => {
     console.log('Emitting risk calculation event')
     emit('riskCalculation')
+}
+
+const handleCalculationComplete = () => {
+    ElMessage.success('Calculation completed')
 }
 </script>
 
@@ -178,10 +242,7 @@ h5 {
 }
 
 .checkbox-group {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin: 10px 0;
+    margin: 15px 0;
 }
 
 .settings-icon {
@@ -216,18 +277,44 @@ h5 {
     margin: 5px 0;
 }
 
-.calculation-btn {
+.button-group {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 20px;
+    margin-bottom: 20px;
+}
+
+.calculation-btn
+{
     width: 100%;
-    margin: 10px 0 20px;
+    margin: 20px 0 10px;
+}
+
+.view-result-btn {
+    width: 100%;
+    margin: 20px 0 10px;
+}
+
+
+.info-icon {
+    margin-left: 8px;
+    color: #909399;
+    cursor: help;
 }
 
 :deep(.el-checkbox) {
     display: flex;
     align-items: center;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
 }
 
-:deep(.el-slider) {
-    margin-bottom: 10px;
+:deep(.el-checkbox__label) {
+    display: flex;
+    align-items: center;
+}
+
+:deep(.el-button) {
+    margin: 0;
 }
 </style> 

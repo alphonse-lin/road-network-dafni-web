@@ -91,15 +91,25 @@
                     <div class="slider-container">
                         <div class="slider-label">
                             <span>Agent Count</span>
-                            <span class="slider-value">100 - 10000</span>
+                            <span class="slider-value">{{ agentCount }}</span>
                         </div>
-                        <el-slider v-model="agentCount" :min="100" :max="10000" range />
+                        <el-slider 
+                            v-model="agentCount" 
+                            :min="100" 
+                            :max="10000" 
+                            :step="100"
+                        />
                         
                         <div class="slider-label">
                             <span>Iteration</span>
-                            <span class="slider-value">20 - 100</span>
+                            <span class="slider-value">{{ iteration }}</span>
                         </div>
-                        <el-slider v-model="iteration" :min="20" :max="100" range />
+                        <el-slider 
+                            v-model="iteration" 
+                            :min="1" 
+                            :max="10" 
+                            :step="1"
+                        />
                     </div>
                     
                     <el-checkbox v-model="multiModal">Multi Modal</el-checkbox>
@@ -118,6 +128,14 @@
                 <el-button class="view-result-btn" disabled>View Result</el-button>
             </div>
         </div>
+
+        <CalculationProgress
+            v-model:visible="showProgress"
+            :project-id="projectId"
+            mode="transportation"
+            title="Transportation Calculation Progress"
+            @calculation-complete="handleCalculationComplete"
+        />
     </div>
 </template>
 
@@ -129,6 +147,7 @@ import 'element-plus/es/components/checkbox/style/css'
 import 'element-plus/es/components/slider/style/css'
 import 'element-plus/es/components/button/style/css'
 import axios from 'axios'
+import CalculationProgress from './CalculationProgress.vue'
 
 // 文件预览复选框状态
 const roadNetworks = ref(false)
@@ -139,8 +158,8 @@ const vehicleType = ref(false)
 const ageStructure = ref(false)
 
 // Matsim配置
-const agentCount = ref([100, 10000])
-const iteration = ref([20, 100])
+const agentCount = ref(10000)
+const iteration = ref(5)
 const multiModal = ref(false)
 
 // 文件上传相关
@@ -165,15 +184,27 @@ const handleFileUpload = async (event) => {
 
     try {
         const formData = new FormData()
-        formData.append('buildings', file)
+        formData.append('building', file)
         formData.append('projectId', props.projectId)
 
-        const response = await axios.post('http://localhost:5000/api/upload-buildings', formData)
+        // 读取文件内容
+        const reader = new FileReader()
+        reader.onload = async (e) => {
+            try {
+                const geojsonData = JSON.parse(e.target.result)
+                emit('updateBuildings', geojsonData) // 发送解析后的 GeoJSON 数据
+            } catch (error) {
+                console.error('Error parsing GeoJSON:', error)
+                ElMessage.error('Invalid GeoJSON file')
+            }
+        }
+        reader.readAsText(file)
+
+        const response = await axios.post('http://localhost:5000/api/upload-building', formData)
         
         if (response.data.success) {
             buildings.value = true
             ElMessage.success('Buildings file uploaded successfully')
-            emit('updateBuildings', file) // 触发更新地图的事件
         }
     } catch (error) {
         console.error('Error uploading buildings file:', error)
@@ -193,8 +224,15 @@ onMounted(async () => {
     }
 })
 
+const showProgress = ref(false)
+
 const handleCalculation = () => {
-    emit('calculate')
+    showProgress.value = true
+}
+
+const handleCalculationComplete = () => {
+    // 计算完成后的处理，比如启用 "View Result" 按钮
+    // TODO: 实现查看结果的逻辑
 }
 </script>
 

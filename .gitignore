@@ -33,3 +33,4 @@ backend/prepare/matsim_preparation_jar/config.xml
 /src/assets/sample_data/output
 /data
 /src/assets/sample_data/debug
+/src/assets/sample_data

@@ -6,7 +6,7 @@
         width="500px"
         :close-on-click-modal="false"
         :close-on-press-escape="false"
-        :show-close="false"
+        :show-close="true"
     >
         <div class="progress-container">
             <!-- 步骤展示 -->
@@ -36,6 +36,11 @@
             <div v-if="error" class="error-message">
                 {{ error }}
             </div>
+
+            <!-- 添加底部按钮 -->
+            <div class="dialog-footer" v-if="error">
+                <el-button @click="$emit('update:visible', false)">Close</el-button>
+            </div>
         </div>
     </el-dialog>
 </template>
@@ -57,7 +62,7 @@ const props = defineProps({
     mode: {
         type: String,
         required: true,
-        validator: (value) => ['single', 'sequence'].includes(value)
+        validator: (value) => ['single', 'sequence', 'transportation', 'vulnerability'].includes(value)
     },
     title: {
         type: String,
@@ -76,6 +81,16 @@ const CALCULATION_MODES = {
         { key: 'inundateMap', title: 'Create Inundate Map', endpoint: '/api/create-inundate-map' },
         { key: 'sequenceGeojson', title: 'Create Sequence GeoJSON', endpoint: '/api/create-sequence-geojson' },
         { key: 'spaceSyntax', title: 'Calculate Space Syntax', endpoint: '/api/calculate-space-syntax' }
+    ],
+    transportation: [
+        { key: 'activityChain', title: 'Generate Activity Chain', endpoint: '/api/generate-activity-chain' },
+        { key: 'matsim', title: 'Run MATSim', endpoint: '/api/run-matsim' },
+        { key: 'convertOutput', title: 'Convert Output', endpoint: '/api/convert-matsim-output' }
+    ],
+    vulnerability: [
+        { key: 'mergeData', title: 'Merge Data', endpoint: '/api/merge-data' },
+        { key: 'dtwMatching', title: 'DTW Matching', endpoint: '/api/dtw-matching' },
+        { key: 'vulnerability', title: 'Calculate Vulnerability', endpoint: '/api/calculate-vulnerability' }
     ]
 }
 
@@ -120,6 +135,7 @@ const executeCalculation = async () => {
         resetState()
         startLoadingAnimation()
 
+        console.log(props.projectId)
         for (const step of calculationSteps.value) {
             statusMessage.value = `Processing ${step.title.toLowerCase()}`
             const response = await axios.post(`http://localhost:5000${step.endpoint}`, {
@@ -244,5 +260,10 @@ watch(() => props.visible, (newVal) => {
     text-align: center;
     margin-top: 20px;
     color: #F56C6C;
+}
+
+.dialog-footer {
+    margin-top: 20px;
+    text-align: center;
 }
 </style> 

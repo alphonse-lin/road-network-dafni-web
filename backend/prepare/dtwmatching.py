@@ -28,7 +28,7 @@ def dtw_matching(input_csv_path, output_csv_path=None, n_jobs=-1):
     """
     # 读取csv文件
     data = pd.read_csv(input_csv_path)
-    
+    success = True
     if output_csv_path is None:
         file_base = os.path.splitext(input_csv_path)[0]
         output_csv_path = f"{file_base}_dtw_matching.csv"
@@ -122,7 +122,7 @@ def dtw_matching(input_csv_path, output_csv_path=None, n_jobs=-1):
     result_df.to_csv(output_csv_path, index=False)
     print(f'DTW匹配分析完成，结果已保存至: {output_csv_path}')
     
-    return result_df
+    return success
 
 if __name__ == '__main__':
     # 使用示例
