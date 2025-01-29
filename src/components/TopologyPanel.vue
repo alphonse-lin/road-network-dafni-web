@@ -2,7 +2,7 @@
     <div class="topology-panel">
         <div class="panel-header">
             <h2>Region</h2>
-            <h3>King’sCross to Farringdon(25km²)</h3>
+            <h3>King'sCross to Farringdon(25km²)</h3>
             <button class="close-btn" @click="$emit('close')">×</button>
         </div>
         
@@ -11,42 +11,75 @@
                 <h4>File Preview</h4>
                 <input
                     type="file"
-                    ref="fileInput"
-                    @change="handleFileUpload"
+                    ref="geojsonInput"
+                    @change="handleGeojsonUpload"
                     style="display: none"
-                    accept=".csv, .json"
+                    accept=".geojson"
+                />
+                <input
+                    type="file"
+                    ref="zipInput"
+                    @change="handleZipUpload"
+                    style="display: none"
+                    accept=".zip"
                 />
                 <button @click="triggerFileUpload" class="upload-btn">
-                    Upload File
+                    Upload Files
                 </button>
                 
                 <div class="checkbox-group">
-                    <el-checkbox v-model="roadNetworks">
-                        Road Networks
-                        <el-icon class="settings-icon"><Setting /></el-icon>
-                    </el-checkbox>
+                    <div class="checkbox-with-info">
+                        <el-checkbox v-model="hasRoadNetworks" disabled>
+                            Road Networks
+                        </el-checkbox>
+                        <el-tooltip
+                            content="Please import geojson file of road networks"
+                            placement="right"
+                        >
+                            <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
+                    </div>
                     
-                    <el-checkbox v-model="inundationMap">
-                        Inundation Map
-                        <el-icon class="settings-icon"><Setting /></el-icon>
-                    </el-checkbox>
+                    <div class="checkbox-with-info">
+                        <el-checkbox v-model="hasInundationMap" disabled>
+                            Inundation Map
+                        </el-checkbox>
+                        <el-tooltip
+                            content="Please import asc files as zip file"
+                            placement="right"
+                        >
+                            <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
+                    </div>
                 </div>
             </div>
 
             <div class="topology-calculation">
                 <h4>Topology Calculation</h4>
-                <div class="topology-images">
-                    <img src="@/assets/topology_1.jpg" alt="Topology 1" />
-                </div>
                 
                 <div class="static-section">
                     <h5>• Static</h5>
-                    <el-checkbox v-model="addMergedSegments">Add Merged Segments</el-checkbox>
-                    <el-checkbox v-model="roadNetworksStatic">Road Networks</el-checkbox>
+                    <div class="topology-images">
+                    <img src="@/assets/topology_1.jpg" alt="Topology 1" />
+                </div>
+                    <el-checkbox 
+                        v-model="addMergedSegments"
+                        :disabled="!hasRoadNetworks"
+                    >
+                        Add Merged Segments
+                    </el-checkbox>
+                    <el-checkbox 
+                        v-model="includeRoadNetworks"
+                        :disabled="!hasRoadNetworks"
+                        checked
+                    >
+                        Road Networks
+                    </el-checkbox>
                     <el-button 
-                        class="calculation-btn" 
-                        type="primary"
+                        type="primary" 
                         @click="handleStaticCalculation"
+                        :disabled="!canCalculateStatic"
+                        class="calculation-btn"
                     >
                         Calculation
                     </el-button>
@@ -59,9 +92,10 @@
                     </div>
                     <el-checkbox v-model="loadingInundationMap">Loading Inudation Map</el-checkbox>
                     <el-button 
-                        class="calculation-btn" 
-                        type="primary"
+                        type="primary" 
                         @click="handleDynamicCalculation"
+                        :disabled="!canCalculateDynamic"
+                        class="calculation-btn"
                     >
                         Calculation
                     </el-button>
@@ -73,48 +107,193 @@
                     <el-button class="view-result-btn" disabled>View Result</el-button>
                 </div>
             </div>
+
+            <!-- 添加进度弹窗组件 -->
+            <CalculationProgress
+                v-model:visible="showCalculationProgress"
+                :project-id="projectId"
+                :mode="calculationType"
+                :title="calculationType === 'single' ? 'Static Calculation' : 'Dynamic Calculation'"
+                @calculation-complete="handleCalculationComplete"
+            />
         </div>
     </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { ElButton, ElCheckbox } from 'element-plus'
-import { Setting } from '@element-plus/icons-vue'
+import { ref, computed } from 'vue'
+import { ElButton, ElCheckbox, ElTooltip, ElMessage } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/checkbox/style/css'
+import 'element-plus/es/components/tooltip/style/css'
+import 'element-plus/es/components/message/style/css'
+// 引入 proj4 进行坐标转换
+import proj4 from 'proj4'
+import { v4 as uuidv4 } from 'uuid'
+import axios from 'axios'
+import CalculationProgress from './CalculationProgress.vue'
 
-// 复选框状态
-const roadNetworks = ref(false)
-const inundationMap = ref(false)
+// 文件上传状态
+const hasRoadNetworks = ref(false)  // 是否已上传道路网络文件
+const hasInundationMap = ref(false)  // 是否已上传淹没图文件
+
+// 计算选项
 const addMergedSegments = ref(false)
-const roadNetworksStatic = ref(false)
+const includeRoadNetworks = ref(true)  // 重命名为 includeRoadNetworks 以区分
 const loadingInundationMap = ref(false)
-// const statisticsType = ref('static')
 
-const emit = defineEmits(['close', 'showStatistics'])
+// 文件上传相关
+const geojsonInput = ref(null)
+const zipInput = ref(null)
+const projectId = ref(null)
+const geojsonFile = ref(null)
+const zipFile = ref(null)
 
+const emit = defineEmits(['close', 'showStatistics', 'updateGeojson'])
+
+// 添加状态
+const showCalculationProgress = ref(false)
+const calculationType = ref('single') // or 'sequence'
+
+// 计算属性来控制按钮的启用状态
+const canCalculateStatic = computed(() => {
+    return hasRoadNetworks.value && addMergedSegments.value && includeRoadNetworks.value
+})
+
+const canCalculateDynamic = computed(() => {
+    return loadingInundationMap.value
+})
+
+// 定义英国国家网格坐标系统
+proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs");
+
+// 转换坐标的函数
+const convertCoordinates = (coordinates) => {
+    // 如果是多维数组（MultiLineString 或 Polygon），递归处理
+    if (Array.isArray(coordinates[0])) {
+        return coordinates.map(coord => convertCoordinates(coord));
+    }
+    // 转换单个坐标点
+    const [x, y] = coordinates;
+    const [lon, lat] = proj4('EPSG:27700', 'EPSG:4326', [x, y]);
+    return [lon, lat];
+};
+
+const convertGeoJSON = (geojson) => {
+    const converted = JSON.parse(JSON.stringify(geojson)); // 深拷贝
+
+    const convertFeature = (feature) => {
+        if (feature.geometry) {
+            const coordinates = feature.geometry.coordinates;
+            feature.geometry.coordinates = convertCoordinates(coordinates);
+        }
+        return feature;
+    };
+
+    if (converted.type === 'FeatureCollection') {
+        converted.features = converted.features.map(convertFeature);
+    } else if (converted.type === 'Feature') {
+        convertFeature(converted);
+    }
+
+    return converted;
+};
+
+// 修改计算按钮的处理函数
 const handleStaticCalculation = () => {
-    emit('showStatistics', 'static')
+    calculationType.value = 'single'
+    showCalculationProgress.value = true
 }
 
 const handleDynamicCalculation = () => {
-    emit('showStatistics', 'dynamic')
+    calculationType.value = 'sequence'
+    showCalculationProgress.value = true
 }
 
-const fileInput = ref(null)
+const uploadFiles = async () => {
+    try {
+        projectId.value = uuidv4()
+        
+        const formData = new FormData()
+        formData.append('projectId', projectId.value)
+        
+        if (geojsonFile.value) {
+            formData.append('geojson', geojsonFile.value)
+        }
+        if (zipFile.value) {
+            formData.append('inundation', zipFile.value)
+        }
+
+        const response = await axios.post('http://localhost:5000/api/upload', formData, {
+            headers: {
+                'Content-Type': 'multipart/form-data'
+            }
+        })
+
+        if (response.data.success) {
+            ElMessage.success('Files uploaded successfully')
+            hasRoadNetworks.value = !!geojsonFile.value
+            hasInundationMap.value = !!zipFile.value
+            
+            // 保存 projectId
+            localStorage.setItem('currentProjectId', projectId.value)
+        }
+    } catch (error) {
+        console.error('Upload error:', error)
+        ElMessage.error('Failed to upload files')
+    }
+}
+
+const handleGeojsonFile = (file) => {
+    console.log('Processing GeoJSON file:', file.name)
+    geojsonFile.value = file
+    
+    const reader = new FileReader()
+    reader.onload = (e) => {
+        try {
+            const geojsonData = JSON.parse(e.target.result)
+            emit('updateGeojson', convertGeoJSON(geojsonData))
+        } catch (error) {
+            ElMessage.error('Error processing GeoJSON file')
+            console.error('Error processing GeoJSON:', error)
+        }
+    }
+    reader.readAsText(file)
+}
+
+const handleZipFile = (file) => {
+    console.log('Processing ZIP file:', file.name)
+    zipFile.value = file
+}
 
 const triggerFileUpload = () => {
-    fileInput.value.click()
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.multiple = true
+    input.accept = '.geojson,.zip'
+    
+    input.onchange = (event) => {
+        const files = Array.from(event.target.files)
+        files.forEach(file => {
+            if (file.name.endsWith('.geojson')) {
+                handleGeojsonFile(file)
+            } else if (file.name.endsWith('.zip')) {
+                handleZipFile(file)
+            }
+        })
+        // 当两个文件都准备好后，自动上传
+        if (geojsonFile.value && zipFile.value) {
+            uploadFiles()
+        }
+    }
+    
+    input.click()
 }
 
-const handleFileUpload = (event) => {
-    const file = event.target.files[0]
-    if (file) {
-        console.log('File selected:', file.name)
-        // TODO: 处理文件上传逻辑
-        // 可以使用 FormData 或其他方式将文件发送到服务器
-    }
+// 添加计算完成的处理函数
+const handleCalculationComplete = () => {
+    emit('showStatistics', calculationType.value === 'single' ? 'static' : 'dynamic')
 }
 </script>
 
@@ -240,5 +419,18 @@ h5 {
     display: flex;
     align-items: center;
     margin-bottom: 8px;
+}
+
+.checkbox-with-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.info-icon {
+    color: #909399;
+    font-size: 16px;
+    cursor: help;
 }
 </style> 

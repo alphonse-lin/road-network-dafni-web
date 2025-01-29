@@ -4,7 +4,7 @@ from pathlib import Path
 import os
 from prepare.createSeqInundateMap import create_inundate_map
 from prepare.createSeqGeoJSON import create_sequence_geojson
-from prepare.csharpCalculation import calculate_space_syntax_for_each_file
+from prepare.csharpCalculation import calculate_space_syntax_for_each_file, calculate_space_syntax
 from prepare.generateDailyActivityChain import generate_daily_activity_chain
 from prepare.runMatsim import run_matsim
 from prepare.convertData import process_matsim_output
@@ -88,15 +88,58 @@ def api_calculate_space_syntax():
         task_dir, input_dir, output_dir = ensure_task_directories(task_id)
         
         input_dir = data.get('input_dir', str(output_dir / '001_inundate_roadnetwork'))
-        radii = data.get('radii', "1000")
+        radii = data.get('radii', "100")
         
         success = calculate_space_syntax_for_each_file(
             input_dir=input_dir,
             output_base_folder=str(output_dir),
             radii=radii
         )
-        return jsonify({'status': 'success' if success else 'error'})
+        print(success)
+        if success:
+            return jsonify({'status': 'success', 'message': 'Space syntax calculation completed'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Space syntax calculation failed'})
+            
     except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/calculate-space-syntax-single', methods=['POST'])
+def api_calculate_space_syntax_single():
+    try:
+        data = request.get_json()
+        task_id = data.get('task_id')
+        if not task_id:
+            return jsonify({'status': 'error', 'message': 'task_id is required'}), 400
+            
+        task_dir, input_dir, output_dir = ensure_task_directories(task_id)
+        
+        # 使用上传的原始 GeoJSON 文件路径
+        input_file = str(input_dir / 'roadnetwork.geojson')
+        if not os.path.exists(input_file):
+            return jsonify({'status': 'error', 'message': 'Input GeoJSON file not found'}), 400
+        
+        # 创建输出目录
+        output_folder = output_dir / '002_topology_calculation'
+        output_folder.mkdir(parents=True, exist_ok=True)
+        
+        # 设置输出文件路径
+        output_file = str(output_folder / 'out_network.geojson')
+        
+        # 执行计算
+        success = calculate_space_syntax(
+            input_file,  # 直接使用输入文件路径
+            output_file, # 直接使用输出文件路径
+            radii="100"
+        )
+        
+        if success:
+            return jsonify({'status': 'success', 'message': 'Space syntax calculation completed'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Space syntax calculation failed'})
+            
+    except Exception as e:
+        print(f"Error in calculate_space_syntax_single: {str(e)}")  # 添加错误日志
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/generate-activity-chain', methods=['POST'])
@@ -223,6 +266,50 @@ def get_status():
         'status': 'running',
         'version': '1.0.0'
     })
+
+@app.route('/api/upload', methods=['POST'])
+def upload_files():
+    try:
+        # 获取项目ID
+        project_id = request.form.get('projectId')
+        if not project_id:
+            return jsonify({'success': False, 'message': 'Project ID is required'}), 400
+
+        # 使用现有的目录结构
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+
+        # 处理 GeoJSON 文件
+        if 'geojson' in request.files:
+            geojson_file = request.files['geojson']
+            geojson_path = input_dir / 'roadnetwork.geojson'
+            geojson_file.save(str(geojson_path))
+
+        # 处理 ZIP 文件
+        if 'inundation' in request.files:
+            zip_file = request.files['inundation']
+            zip_path = input_dir / 'flooding_output.zip'
+            zip_file.save(str(zip_path))
+
+        print(f"Project ID: {project_id}")
+        print(f"Input Directory: {input_dir}")
+        print(f"Output Directory: {output_dir}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Files uploaded successfully',
+            'projectId': project_id,
+            'paths': {
+                'input': str(input_dir),
+                'output': str(output_dir)
+            }
+        })
+
+    except Exception as e:
+        print(f"Upload error: {str(e)}")  # 用于调试
+        return jsonify({
+            'success': False,
+            'message': f'Failed to upload files: {str(e)}'
+        }), 500
 
 if __name__ == '__main__':
     # 确保数据根目录存在

@@ -65,15 +65,15 @@ def calculate_space_syntax_for_each_file(input_dir, output_base_folder, radii):
     output_folder = os.path.join(output_base_folder, "002_topology_calculation")
     os.makedirs(output_folder, exist_ok=True)
     
+    all_success = True  # 添加一个标志来跟踪所有计算是否成功
+    
     # 遍历输入目录中的所有geojson文件
     for input_file in os.listdir(input_dir):
         if input_file.endswith('.geojson'):
             # 构建完整的输入文件路径
             full_input_path = os.path.join(input_dir, input_file)
-            
-            # 从文件名中提取水位高度信息（例如：从 network_h_450.geojson 提取 450）
+            # 从文件名中提取水位高度信息
             height = input_file.split('_h_')[1].split('.')[0]
-            
             output_file_path = os.path.join(output_folder, f"out_{input_file}")
             print(f"Processing file: {input_file}")
             print(f"Output folder: {output_folder}")
@@ -85,8 +85,11 @@ def calculate_space_syntax_for_each_file(input_dir, output_base_folder, radii):
                 print(f"Calculation success for height {height}")
             else:
                 print(f"Calculation failed for height {height}")
+                all_success = False  # 如果任何一个文件计算失败，设置标志为False
             
-            print("-" * 50)  # 分隔线，使输出更清晰
+            print("-" * 50)
+    
+    return all_success  # 返回整体计算结果
 
 if __name__ == "__main__":
     # 设置输入输出路径

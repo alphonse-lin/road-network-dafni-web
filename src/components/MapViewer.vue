@@ -10,6 +10,7 @@
     v-if="activePanel === 'topology'"
     @close="closeTopologyPanel"
     @showStatistics="handleShowStatistics"
+    @updateGeojson="handleGeojsonUpdate"
 />
 <TransportationPanel
     v-if="activePanel === 'transportation'"
@@ -61,6 +62,7 @@ import TransportationPanel from './TransportationPanel.vue'
 import TransportationStatisticsPanel from './TransportationStatisticsPanel.vue'
 import IndexPanel from './IndexPanel.vue'
 import IndexStatisticsPanel from './IndexStatisticsPanel.vue'
+import { ElMessage } from 'element-plus'
 
 export default {
     name: 'MapViewer',
@@ -186,9 +188,14 @@ export default {
         // hover 效果
         this.viewer.screenSpaceEventHandler.setInputAction((movement) => {
             const pickedObject = this.viewer.scene.pick(movement.endPosition);
-            if (Cesium.defined(pickedObject) && pickedObject.id && pickedObject.id.id === this.londonEntity.id) {
-                this.londonEntity.billboard.scale = 0.9;  // 放大图标
-            } else {
+            if (Cesium.defined(pickedObject) && 
+                pickedObject.id && 
+                this.londonEntity &&
+                pickedObject.id.id === this.londonEntity.id) {
+                if (this.londonEntity.billboard) {
+                    this.londonEntity.billboard.scale = 0.9;  // 放大图标
+                }
+            } else if (this.londonEntity && this.londonEntity.billboard) {
                 this.londonEntity.billboard.scale = 0.7;   // 恢复原始大小
             }
         }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
@@ -287,6 +294,141 @@ export default {
         
         closeIndexStatsPanel() {
             this.showIndexStatsPanel = false
+        },
+        async handleGeojsonUpdate(geojsonData) {
+            try {
+                console.log('Starting handleGeojsonUpdate');
+                
+                // 首先移除鼠标移动事件处理器
+                if (this.viewer && this.viewer.screenSpaceEventHandler) {
+                    this.viewer.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+                }
+
+                // 确保 viewer 存在且未被销毁
+                if (!this.viewer || this.viewer.isDestroyed()) {
+                    console.error('Viewer is not available or has been destroyed');
+                    return;
+                }
+
+                // 安全地移除现有数据源
+                if (this.currentGeoJsonDataSource) {
+                    try {
+                        if (!this.currentGeoJsonDataSource.isDestroyed()) {
+                            await this.viewer.dataSources.remove(this.currentGeoJsonDataSource);
+                        }
+                    } catch (e) {
+                        console.warn('Error removing existing data source:', e);
+                    }
+                    this.currentGeoJsonDataSource = null;
+                }
+
+                // 安全地移除 London entity
+                if (this.londonEntity) {
+                    try {
+                        if (this.viewer.entities.contains(this.londonEntity)) {
+                            this.viewer.entities.remove(this.londonEntity);
+                        }
+                    } catch (e) {
+                        console.warn('Error removing London entity:', e);
+                    }
+                    this.londonEntity = null;
+                }
+
+                // 验证 GeoJSON 数据
+                if (!geojsonData || !geojsonData.features) {
+                    console.error('Invalid GeoJSON data');
+                    return;
+                }
+
+                // 创建新的数据源
+                const dataSource = new Cesium.GeoJsonDataSource('roadNetwork');
+                
+                try {
+                    await dataSource.load(geojsonData, {
+                        stroke: new Cesium.Color(0, 0, 1, 1),
+                        strokeWidth: 3,
+                        fill: new Cesium.Color(0, 0, 1, 0.1),
+                        clampToGround: false
+                    });
+
+                    // 添加到查看器
+                    await this.viewer.dataSources.add(dataSource);
+                    this.currentGeoJsonDataSource = dataSource;
+
+                    // 获取实体并设置样式
+                    const entities = dataSource.entities.values;
+                    if (entities && entities.length > 0) {
+                        entities.forEach(entity => {
+                            if (entity && entity.polyline) {
+                                entity.polyline.width = 2;
+                                entity.polyline.material = new Cesium.ColorMaterialProperty(
+                                    new Cesium.Color(0, 0, 1, 1)
+                                );
+                            }
+                        });
+
+                        // 计算边界框
+                        let west = Infinity;
+                        let south = Infinity;
+                        let east = -Infinity;
+                        let north = -Infinity;
+
+                        // 遍历所有特征以找到边界
+                        geojsonData.features.forEach(feature => {
+                            if (feature.geometry && feature.geometry.coordinates) {
+                                const coordinates = feature.geometry.coordinates;
+                                if (feature.geometry.type === 'LineString') {
+                                    coordinates.forEach(coord => {
+                                        west = Math.min(west, coord[0]);
+                                        south = Math.min(south, coord[1]);
+                                        east = Math.max(east, coord[0]);
+                                        north = Math.max(north, coord[1]);
+                                    });
+                                } else if (feature.geometry.type === 'MultiLineString') {
+                                    coordinates.forEach(line => {
+                                        line.forEach(coord => {
+                                            west = Math.min(west, coord[0]);
+                                            south = Math.min(south, coord[1]);
+                                            east = Math.max(east, coord[0]);
+                                            north = Math.max(north, coord[1]);
+                                        });
+                                    });
+                                }
+                            }
+                        });
+
+                        // 添加一些边距
+                        const padding = 0.001; // 根据需要调整边距大小
+                        west -= padding;
+                        south -= padding;
+                        east += padding;
+                        north += padding;
+
+                        // 设置为 2D 模式并禁用倾斜
+                        if (!this.viewer.isDestroyed()) {
+                            this.viewer.scene.mode = Cesium.SceneMode.SCENE2D;
+                            this.viewer.scene.screenSpaceCameraController.enableTilt = false;
+                            this.viewer.scene.screenSpaceCameraController.enableRotate = false;
+                            
+                            // 移除 cesium 的 credit 信息
+                            this.viewer.cesiumWidget.creditContainer.style.display = "none";
+
+                            // 将视图设置到边界框
+                            this.viewer.camera.setView({
+                                destination: Cesium.Rectangle.fromDegrees(west, south, east, north)
+                            });
+                        }
+                    }
+
+                } catch (error) {
+                    console.error('Error processing GeoJSON:', error);
+                    ElMessage.error('Error loading GeoJSON data');
+                }
+
+            } catch (error) {
+                console.error('Error in handleGeojsonUpdate:', error);
+                ElMessage.error('An error occurred while updating the map');
+            }
         }
     },
     computed: {

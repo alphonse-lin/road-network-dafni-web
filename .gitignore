@@ -31,3 +31,5 @@ backend/prepare/matsim_preparation_jar/config.xml
 *.csv
 /backend/prepare/topology_calc_csharp
 /src/assets/sample_data/output
+/data
+/src/assets/sample_data/debug
