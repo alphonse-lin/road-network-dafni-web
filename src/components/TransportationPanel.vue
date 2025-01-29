@@ -2,7 +2,7 @@
     <div class="transportation-panel">
         <div class="panel-header">
             <h2>Region</h2>
-            <h3>King’sCross to Farringdon(25km²)</h3>
+            <h3>King'sCross to Farringdon(25km²)</h3>
             <button class="close-btn" @click="$emit('close')">×</button>
         </div>
         
@@ -17,43 +17,67 @@
                     ref="fileInput"
                     @change="handleFileUpload"
                     style="display: none"
-                    accept=".csv, .json"
+                    accept=".geojson"
                 />
                 
                 <div class="checkbox-group">
-                    <el-checkbox v-model="roadNetworks">
-                        Road Networks
-                        <el-icon class="settings-icon"><Setting /></el-icon>
-                    </el-checkbox>
+                    <div class="checkbox-with-info">
+                        <el-checkbox v-model="roadNetworks" disabled>
+                            Road Networks
+                        </el-checkbox>
+                        <el-tooltip content="Please import geojson file of road networks" placement="right">
+                            <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
+                    </div>
                     
-                    <el-checkbox v-model="inundationMap">
-                        Inundation Map
-                        <el-icon class="settings-icon"><Setting /></el-icon>
-                    </el-checkbox>
+                    <div class="checkbox-with-info">
+                        <el-checkbox v-model="inundationMap" disabled>
+                            Inundation Map
+                        </el-checkbox>
+                        <el-tooltip content="Please import asc files as zip file" placement="right">
+                            <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
+                    </div>
                     
-                    <el-checkbox v-model="buildings">
-                        Buildings
-                        <el-icon class="settings-icon"><Setting /></el-icon>
-                    </el-checkbox>
+                    <div class="checkbox-with-info">
+                        <el-checkbox v-model="buildings" disabled>
+                            Buildings
+                        </el-checkbox>
+                        <el-tooltip content="Please import geojson file of buildings in chosen area" placement="right">
+                            <el-icon class="info-icon"><InfoFilled /></el-icon>
+                        </el-tooltip>
+                    </div>
                 </div>
 
                 <div class="optional-section">
                     <p class="optional-text">optional</p>
                     <div class="checkbox-group">
-                        <el-checkbox v-model="landUse">
-                            Land Use
-                            <el-icon class="settings-icon"><Setting /></el-icon>
-                        </el-checkbox>
+                        <div class="checkbox-with-info">
+                            <el-checkbox v-model="landUse">
+                                Land Use
+                            </el-checkbox>
+                            <el-tooltip content="Please import the landuse info of chosen area. Otherwise it would apply default config" placement="right">
+                                <el-icon class="info-icon"><InfoFilled /></el-icon>
+                            </el-tooltip>
+                        </div>
                         
-                        <el-checkbox v-model="vehicleType">
-                            Vehicle Type
-                            <el-icon class="settings-icon"><Setting /></el-icon>
-                        </el-checkbox>
+                        <div class="checkbox-with-info">
+                            <el-checkbox v-model="vehicleType">
+                                Vehicle Type
+                            </el-checkbox>
+                            <el-tooltip content="Please import the verhicle type info of chosen area. Otherwise it would apply default config" placement="right">
+                                <el-icon class="info-icon"><InfoFilled /></el-icon>
+                            </el-tooltip>
+                        </div>
                         
-                        <el-checkbox v-model="ageStructure">
-                            Age Structure
-                            <el-icon class="settings-icon"><Setting /></el-icon>
-                        </el-checkbox>
+                        <div class="checkbox-with-info">
+                            <el-checkbox v-model="ageStructure">
+                                Age Structure
+                            </el-checkbox>
+                            <el-tooltip content="Please import the age info of chosen area. Otherwise it would apply default config" placement="right">
+                                <el-icon class="info-icon"><InfoFilled /></el-icon>
+                            </el-tooltip>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -98,12 +122,13 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { ElCheckbox, ElSlider, ElButton } from 'element-plus'
-import { Setting } from '@element-plus/icons-vue'
+import { ref, onMounted } from 'vue'
+import { ElCheckbox, ElSlider, ElButton, ElTooltip, ElMessage } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
 import 'element-plus/es/components/checkbox/style/css'
 import 'element-plus/es/components/slider/style/css'
 import 'element-plus/es/components/button/style/css'
+import axios from 'axios'
 
 // 文件预览复选框状态
 const roadNetworks = ref(false)
@@ -124,14 +149,49 @@ const triggerFileUpload = () => {
     fileInput.value.click()
 }
 
-const handleFileUpload = (event) => {
+const props = defineProps({
+    projectId: {
+        type: String,
+        required: true
+    }
+})
+
+const emit = defineEmits(['close', 'calculate', 'updateBuildings'])
+
+// 处理文件上传
+const handleFileUpload = async (event) => {
     const file = event.target.files[0]
-    if (file) {
-        console.log('File selected:', file.name)
+    if (!file) return
+
+    try {
+        const formData = new FormData()
+        formData.append('buildings', file)
+        formData.append('projectId', props.projectId)
+
+        const response = await axios.post('http://localhost:5000/api/upload-buildings', formData)
+        
+        if (response.data.success) {
+            buildings.value = true
+            ElMessage.success('Buildings file uploaded successfully')
+            emit('updateBuildings', file) // 触发更新地图的事件
+        }
+    } catch (error) {
+        console.error('Error uploading buildings file:', error)
+        ElMessage.error('Failed to upload buildings file')
     }
 }
 
-const emit = defineEmits(['close', 'calculate'])
+// 在组件挂载时检查已有文件状态
+onMounted(async () => {
+    try {
+        const response = await axios.get(`http://localhost:5000/api/check-files/${props.projectId}`)
+        roadNetworks.value = response.data.hasRoadNetworks
+        inundationMap.value = response.data.hasInundationMap
+        buildings.value = response.data.hasBuildings
+    } catch (error) {
+        console.error('Error checking file status:', error)
+    }
+})
 
 const handleCalculation = () => {
     emit('calculate')
@@ -270,5 +330,16 @@ h5 {
 
 :deep(.el-slider) {
     margin-bottom: 20px;
+}
+
+.checkbox-with-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.info-icon {
+    color: #909399;
+    cursor: help;
 }
 </style> 

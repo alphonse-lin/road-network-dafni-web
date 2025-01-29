@@ -134,6 +134,9 @@ import { v4 as uuidv4 } from 'uuid'
 import axios from 'axios'
 import CalculationProgress from './CalculationProgress.vue'
 
+// 添加 projectId ref
+const projectId = ref(null)
+
 // 文件上传状态
 const hasRoadNetworks = ref(false)  // 是否已上传道路网络文件
 const hasInundationMap = ref(false)  // 是否已上传淹没图文件
@@ -146,11 +149,10 @@ const loadingInundationMap = ref(false)
 // 文件上传相关
 const geojsonInput = ref(null)
 const zipInput = ref(null)
-const projectId = ref(null)
 const geojsonFile = ref(null)
 const zipFile = ref(null)
 
-const emit = defineEmits(['close', 'showStatistics', 'updateGeojson'])
+const emit = defineEmits(['close', 'showStatistics', 'updateGeojson', 'projectIdGenerated'])
 
 // 添加状态
 const showCalculationProgress = ref(false)
@@ -211,9 +213,20 @@ const handleDynamicCalculation = () => {
     showCalculationProgress.value = true
 }
 
+// // 修改 props 定义
+// const props = defineProps({
+//     projectId: {
+//         type: String,
+//         required: true
+//     }
+// })
+
 const uploadFiles = async () => {
     try {
         projectId.value = uuidv4()
+        
+        // 通知父组件新生成的 projectId
+        emit('projectIdGenerated', projectId.value)
         
         const formData = new FormData()
         formData.append('projectId', projectId.value)
@@ -235,9 +248,6 @@ const uploadFiles = async () => {
             ElMessage.success('Files uploaded successfully')
             hasRoadNetworks.value = !!geojsonFile.value
             hasInundationMap.value = !!zipFile.value
-            
-            // 保存 projectId
-            localStorage.setItem('currentProjectId', projectId.value)
         }
     } catch (error) {
         console.error('Upload error:', error)

@@ -311,6 +311,49 @@ def upload_files():
             'message': f'Failed to upload files: {str(e)}'
         }), 500
 
+@app.route('/api/upload-buildings', methods=['POST'])
+def upload_buildings():
+    try:
+        project_id = request.form.get('projectId')
+        if not project_id:
+            return jsonify({'success': False, 'message': 'Project ID is required'}), 400
+
+        if 'buildings' not in request.files:
+            return jsonify({'success': False, 'message': 'No buildings file provided'}), 400
+
+        buildings_file = request.files['buildings']
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+        
+        # 保存 buildings 文件
+        buildings_path = input_dir / 'buildings.geojson'
+        buildings_file.save(str(buildings_path))
+
+        return jsonify({
+            'success': True,
+            'message': 'Buildings file uploaded successfully'
+        })
+
+    except Exception as e:
+        print(f"Upload buildings error: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Failed to upload buildings file: {str(e)}'
+        }), 500
+
+@app.route('/api/check-files/<project_id>', methods=['GET'])
+def check_files(project_id):
+    try:
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+        
+        return jsonify({
+            'hasRoadNetworks': (input_dir / 'roadnetwork.geojson').exists(),
+            'hasInundationMap': (input_dir / 'flooding_output.zip').exists(),
+            'hasBuildings': (input_dir / 'buildings.geojson').exists()
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     # 确保数据根目录存在
     DATA_DIR.mkdir(parents=True, exist_ok=True)
