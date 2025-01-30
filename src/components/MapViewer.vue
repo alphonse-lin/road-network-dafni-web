@@ -44,13 +44,23 @@
         ref="statisticsPanel"
         :type="statisticsType"
         :hasDynamicData="hasDynamicData"
+        :projectId="projectId"
         @close="closeStatisticsPanel"
+        @topology-result="handleTopologyResult"
     />
     <IndexStatisticsPanel
         v-if="showIndexStatsPanel"
         :analysis-type="indexAnalysisType"
         @close="closeIndexStatsPanel"
     />
+    <div v-if="showLegend" class="legend-container">
+        <div class="legend-title">Betweenness Centrality</div>
+        <div class="legend-gradient"></div>
+        <div class="legend-labels">
+            <span>{{ minMC.toFixed(2) }}</span>
+            <span>{{ maxMC.toFixed(2) }}</span>
+        </div>
+    </div>
     </template>
     
     <script>
@@ -99,7 +109,10 @@
                 showIndexStatsPanel: false,
                 indexAnalysisType: 'vulnerability',
                 projectId: null,
-                currentBuildingsDataSource: null
+                currentBuildingsDataSource: null,
+                showLegend: false,
+                minMC: 0,
+                maxMC: 1,
             }
         },
         mounted() {
@@ -249,6 +262,10 @@
                 this.closeAllRightPanels();
             },
             handleShowStatistics(type) {
+                if (!this.projectId) {
+                    ElMessage.error('Project ID is not set');
+                    return;
+                }
                 this.statisticsType = type;
                 if (type === 'dynamic') {
                     this.hasDynamicData = true;
@@ -368,14 +385,50 @@
                         // 获取实体并设置样式
                         const entities = dataSource.entities.values;
                         if (entities && entities.length > 0) {
-                            entities.forEach(entity => {
-                                if (entity && entity.polyline) {
-                                    entity.polyline.width = 2;
-                                    entity.polyline.material = new Cesium.ColorMaterialProperty(
-                                        new Cesium.Color(0, 0, 1, 1)
-                                    );
-                                }
-                            });
+                            // 检查是否有 MC_100 值
+                            const hasMCValues = geojsonData.features.some(f => 'MC_100' in f.properties);
+                            console.log(hasMCValues)
+                            if (hasMCValues) {
+                                // 计算 MC 值的范围
+                                const mcValues = geojsonData.features.map(f => f.properties.MC_100);
+                                const minMC = Math.min(...mcValues);
+                                const maxMC = Math.max(...mcValues);
+                                
+                                // 显示图例
+                                this.showLegend = true;
+                                this.minMC = minMC;
+                                this.maxMC = maxMC;
+
+                                // 为每条道路设置颜色
+                                entities.forEach((entity, index) => {
+                                    if (entity && entity.polyline) {
+                                        const mcValue = geojsonData.features[index].properties.MC_100;
+                                        const normalizedValue = (mcValue - minMC) / (maxMC - minMC);
+                                        
+                                        const color = Cesium.Color.fromHsl(
+                                            (1 - normalizedValue) * 0.6, // hue: 0.6(蓝) -> 0(红)
+                                            1.0,  // saturation
+                                            0.5,  // lightness
+                                            1.0   // alpha
+                                        );
+                                        
+                                        entity.polyline.width = 2;
+                                        entity.polyline.material = new Cesium.ColorMaterialProperty(color);
+                                    }
+                                });
+                            } else {
+                                // 使用默认颜色（原始的青色）
+                                entities.forEach(entity => {
+                                    if (entity && entity.polyline) {
+                                        entity.polyline.width = 2;
+                                        entity.polyline.material = new Cesium.ColorMaterialProperty(
+                                            new Cesium.Color(0, 1, 1, 1)
+                                        );
+                                    }
+                                });
+                                // 隐藏图例
+                                this.showLegend = false;
+                            }
     
                             // 计算边界框
                             let west = Infinity;
@@ -444,90 +497,47 @@
                 this.projectId = id;
                 console.log('Project ID set in MapViewer:', id);
             },
-            // async handleBuildingsUpdate(geojsonData) {
-            //     try {
-            //         console.log('Starting handleBuildingsUpdate');
+            async handleTopologyResult(geojsonData) {
+                try {
+                    // 确保数据源存在
+                    if (!this.currentGeoJsonDataSource) {
+                        console.error('No existing data source to update');
+                        return;
+                    }
 
-            //         // 定义坐标转换函数
-            //         const convertCoordinates = (coordinates) => {
-            //             // 如果是多维数组（MultiPolygon 或 Polygon），递归处理
-            //             if (Array.isArray(coordinates[0])) {
-            //                 return coordinates.map(coord => convertCoordinates(coord));
-            //             }
-                        
-            //             // 处理单个坐标点
-            //             if (coordinates.length === 2 && typeof coordinates[0] === 'number' && typeof coordinates[1] === 'number') {
-            //                 const [lon, lat] = proj4('EPSG:27700', 'EPSG:4326', coordinates);
-            //                 return [
-            //                     Number(lon.toFixed(6)),
-            //                     Number(lat.toFixed(6))
-            //                 ];
-            //             }
-
-            //             throw new Error(`Invalid coordinate format: ${JSON.stringify(coordinates)}`);
-            //         };
-
-            //         // 创建新的 GeoJSON 对象，明确指定 WGS84 坐标系统
-            //         const convertedGeojson = {
-            //             type: "FeatureCollection",
-            //             features: geojsonData.features.map(feature => ({
-            //                 type: "Feature",
-            //                 properties: feature.properties,
-            //                 geometry: {
-            //                     type: feature.geometry.type,
-            //                     coordinates: convertCoordinates(feature.geometry.coordinates)
-            //                 }
-            //             }))
-            //         };
-
-            //         // 创建新的数据源
-            //         const dataSource = new Cesium.GeoJsonDataSource('buildings');
+                    // 计算 MC 值的范围
+                    const mcValues = geojsonData.features.map(f => f.properties.MC_100);
+                    const minMC = Math.min(...mcValues);
+                    const maxMC = Math.max(...mcValues);
                     
-            //         try {
-            //             // 移除现有的数据源
-            //             if (this.currentBuildingsDataSource) {
-            //                 await this.viewer.dataSources.remove(this.currentBuildingsDataSource);
-            //             }
+                    // 显示图例
+                    this.showLegend = true;
+                    this.minMC = minMC;
+                    this.maxMC = maxMC;
 
-            //             // 加载新的数据
-            //             await dataSource.load(convertedGeojson, {
-            //                 stroke: new Cesium.Color(1, 0, 0, 1),
-            //                 fill: new Cesium.Color(1, 0, 0, 0.3),
-            //                 strokeWidth: 2,
-            //                 clampToGround: false
-            //             });
+                    // 更新现有实体的颜色
+                    const entities = this.currentGeoJsonDataSource.entities.values;
+                    entities.forEach((entity, index) => {
+                        if (entity && entity.polyline) {
+                            const mcValue = geojsonData.features[index].properties.MC_100;
+                            const normalizedValue = (mcValue - minMC) / (maxMC - minMC);
+                            
+                            const color = Cesium.Color.fromHsl(
+                                (1 - normalizedValue) * 0.6, // hue: 0.6(蓝) -> 0(红)
+                                1.0,  // saturation
+                                0.5,  // lightness
+                                1.0   // alpha
+                            );
+                            
+                            entity.polyline.material = new Cesium.ColorMaterialProperty(color);
+                        }
+                    });
 
-            //             // 添加到查看器
-            //             await this.viewer.dataSources.add(dataSource);
-            //             this.currentBuildingsDataSource = dataSource;
-
-            //             // 设置实体样式
-            //             const entities = dataSource.entities.values;
-            //             if (entities && entities.length > 0) {
-            //                 entities.forEach(entity => {
-            //                     if (entity.polygon) {
-            //                         entity.polygon.material = new Cesium.ColorMaterialProperty(
-            //                             new Cesium.Color(1, 0, 0, 0.3)
-            //                         );
-            //                         entity.polygon.outline = true;
-            //                         entity.polygon.outlineColor = new Cesium.ColorMaterialProperty(
-            //                             new Cesium.Color(1, 0, 0, 1)
-            //                         );
-            //                         entity.polygon.outlineWidth = 2;
-            //                     }
-            //                 });
-            //             }
-
-            //         } catch (error) {
-            //             console.error('Error processing buildings GeoJSON:', error);
-            //             ElMessage.error('Error loading buildings GeoJSON data');
-            //         }
-
-            //     } catch (error) {
-            //         console.error('Error in handleBuildingsUpdate:', error);
-            //         ElMessage.error('An error occurred while updating buildings on the map');
-            //     }
-            // }
+                } catch (error) {
+                    console.error('Error updating topology results:', error);
+                    ElMessage.error('Failed to update topology visualization');
+                }
+            }
         },
         computed: {
             showTopologyPanel() {
@@ -569,5 +579,47 @@
     .cesium-viewer-geocoderContainer {
         top: 20px !important;
         right: 20px !important;
+    }
+    
+    /* 修改图例容器的样式 */
+    .legend-container {
+        position: fixed;
+        left: 480px; /* TopologyPanel 的宽度(400px) + 左边距(20px) + 间距(20px) */
+        top: 780px; /* 与 TopologyPanel 对齐 */
+        background: rgba(255, 255, 255, 0.95);
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        z-index: 1000;
+        width: 200px; /* 固定宽度 */
+    }
+    
+    .legend-title {
+        font-size: 14px;
+        margin-bottom: 8px;
+        color: #333;
+        font-weight: 500;
+    }
+    
+    .legend-gradient {
+        width: 100%;
+        height: 20px;
+        background: linear-gradient(to right, 
+            hsl(216, 100%, 50%),  /* 蓝色 */
+            hsl(180, 100%, 50%),  /* 青色 */
+            hsl(120, 100%, 50%),  /* 绿色 */
+            hsl(60, 100%, 50%),   /* 黄色 */
+            hsl(0, 100%, 50%)     /* 红色 */
+        );
+        border-radius: 4px;
+        margin: 5px 0;
+    }
+    
+    .legend-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        color: #666;
+        margin-top: 4px;
     }
     </style>

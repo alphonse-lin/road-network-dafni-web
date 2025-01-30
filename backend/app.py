@@ -11,6 +11,8 @@ from prepare.convertData import process_matsim_output
 from prepare.mergeData import merge_data
 from prepare.dtwmatching import dtw_matching
 from prepare.vulnerabilityCalculation import calculate_vulnerability
+import json
+import sys  # 添加这行
 
 app = Flask(__name__)
 CORS(app)  # 启用跨域支持
@@ -19,13 +21,22 @@ CORS(app)  # 启用跨域支持
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / 'data'  # 所有计算任务的根目录
 
-def ensure_task_directories(task_id):
-    """确保任务相关的目录存在"""
-    task_dir = DATA_DIR / str(task_id)
+def ensure_task_directories(project_id):
+    # 获取项目根目录
+    base_dir = Path(__file__).parent.parent
+    
+    # 构建目录路径
+    task_dir = base_dir / 'data' / project_id
     input_dir = task_dir / 'input'
     output_dir = task_dir / 'output'
     
-    # 创建目录
+    # 打印调试信息
+    print(f"Base directory: {base_dir}")
+    print(f"Task directory: {task_dir}")
+    print(f"Output directory: {output_dir}")
+    
+    # 确保目录存在
+    task_dir.mkdir(parents=True, exist_ok=True)
     input_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
     
@@ -366,6 +377,41 @@ def check_calculation_files(project_id):
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/topology/network', methods=['GET'])
+def get_topology_network():
+    print("=== Starting get_topology_network ===")  # 添加这行
+    try:
+        project_id = request.args.get('project_id')
+        print("Project ID from request:", project_id, file=sys.stderr)  # 修改这行
+        
+        if not project_id:
+            print("No project ID provided", file=sys.stderr)  # 添加这行
+            return jsonify({'status': 'error', 'message': 'Project ID is required'}), 400
+            
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+        geojson_path = output_dir / '002_topology_calculation' / 'out_network.geojson'
+        
+        print(f"File path: {geojson_path}", file=sys.stderr)  # 添加这行
+        print(f"File exists: {geojson_path.exists()}", file=sys.stderr)  # 添加这行
+        
+        if not geojson_path.exists():
+            print("File not found!", file=sys.stderr)  # 添加这行
+            return jsonify({
+                'status': 'error', 
+                'message': f'Topology calculation result not found at {geojson_path}'
+            }), 404
+            
+        with open(geojson_path, 'r') as f:
+            geojson_data = json.load(f)
+            
+        return jsonify(geojson_data)
+        
+    except Exception as e:
+        print(f"Error in get_topology_network: {str(e)}", file=sys.stderr)  # 修改这行
+        import traceback  # 添加这行
+        print(traceback.format_exc(), file=sys.stderr)  # 添加这行
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
     # 确保数据根目录存在
