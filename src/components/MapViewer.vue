@@ -29,6 +29,7 @@
     />
     <TransportationStatisticsPanel
         v-if="showTransportationStatsPanel"
+        :projectId="projectId"
         @close="closeTransportationStatsPanel"
     />
     <ControlButtons 
@@ -48,6 +49,7 @@
         :radius="currentRadii"
         @close="closeStatisticsPanel"
         @topology-result="handleTopologyResult"
+        @time-point-changed="handleTimePointChange"
     />
     <IndexStatisticsPanel
         v-if="showIndexStatsPanel"
@@ -69,6 +71,15 @@
             <span>{{ maxMC.toFixed(2) }}</span>
         </div>
     </div>
+    <div v-if="mapStore.showLegend" class="traffic-flow-legend">
+        <h4>Traffic Flow</h4>
+        <div class="flow-gradient"></div>
+        <div class="flow-labels">
+            <span>0</span>
+            <span>60</span>
+            <span>120</span>
+        </div>
+    </div>
     </template>
     
     <script>
@@ -79,7 +90,7 @@
     import markerIcon from '@/assets/marker-icon.png'
     import ControlButtons from './ControlButtons.vue'
     import TopologyPanel from './TopologyPanel.vue'
-    import TopologyStatisticsPanel from './TopologyStatisticsPanel.vue'
+    // import TopologyStatisticsPanel from './TopologyStatisticsPanel.vue'
     import TransportationPanel from './TransportationPanel.vue'
     import TransportationStatisticsPanel from './TransportationStatisticsPanel.vue'
     import IndexPanel from './IndexPanel.vue'
@@ -87,8 +98,11 @@
     import CalculationProgress from './CalculationProgress.vue'
     import { ElMessage } from 'element-plus'
     import proj4 from 'proj4'
-    import { ref, inject } from 'vue'
+    import { ref, inject, nextTick } from 'vue'
     import { useTopologyStore } from '@/stores/topology'
+    import axios from '@/utils/axios'
+    import { defineAsyncComponent } from 'vue'
+    import { useMapStore } from '@/stores/map'
     
     // 定义英国国家网格坐标系统 (EPSG:27700)
     proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs");
@@ -100,7 +114,7 @@
             InfoPanel,
             ControlButtons,
             TopologyPanel,
-            StatisticsPanel: TopologyStatisticsPanel,
+            StatisticsPanel: defineAsyncComponent(() => import('./TopologyStatisticsPanel.vue')),
             TransportationPanel,
             TransportationStatisticsPanel,
             IndexPanel,
@@ -129,15 +143,24 @@
                 showCalculationProgress: false,
                 calculationType: 'static',
                 pendingRadius: null,
+                availableCalculationTypes: new Set(), // 追踪可用的计算类型
+                calculationResults: {
+                    static: false,
+                    dynamic: false
+                },
+                trafficDataSource: null, // 新增：专门用于显示交通流量的数据源
+                trafficDataCache: null, // 新增：用于缓存交通数据
             }
         },
         setup() {
             const calculationRadius = inject('calculationRadius', ref('100'))
             const topologyStore = useTopologyStore()
+            const mapStore = useMapStore()
             
             return {
                 calculationRadius,
-                topologyStore
+                topologyStore,
+                mapStore
             }
         },
         mounted() {
@@ -248,6 +271,14 @@
                     this.londonEntity.billboard.scale = 0.7;   // 恢复原始大小
                 }
             }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+            // 将 viewer 实例保存到 mapStore
+            this.mapStore.setMapInstance({
+                loadTrafficNetwork: this.loadTrafficNetwork.bind(this),
+                updateTrafficVisualization: this.updateTrafficVisualization.bind(this),
+                clearTrafficVisualization: this.clearTrafficVisualization.bind(this),
+                clearAllDataSources: this.clearAllDataSources.bind(this)
+            });
         },
         beforeUnmount() {
             if (this.viewer) {
@@ -312,8 +343,7 @@
                 this.closeAllRightPanels();
             },
             handleTransportationCalculation() {
-                this.showTransportationStatsPanel = true;
-                this.showStatisticsPanel = false;
+                this.showTransportationStatsPanel = true
             },
             closeTransportationStatsPanel() {
                 this.showTransportationStatsPanel = false
@@ -528,37 +558,62 @@
                     const mcField = `MC_${this.topologyStore.currentRadius}`
                     console.log('MapViewer: Using MC field:', mcField)
                     
-                    // 计算 MC 值的范围
-                    const mcValues = geojsonData.features.map(f => {
-                        const value = f.properties[mcField]
-                        if (value === undefined) {
-                            console.warn(`No ${mcField} found in properties:`, f.properties)
+                    // 获取所有 MC 值
+                    const mcValues = geojsonData.features.map(f => f.properties[mcField])
+                    
+                    // 对非零值进行对数变换
+                    const logMcValues = mcValues.map(value => {
+                        if (value > 0) {
+                            return Math.log10(value)
                         }
-                        return value
+                        return value  // 保持零值不变
                     })
-                    const minMC = Math.min(...mcValues)
-                    const maxMC = Math.max(...mcValues)
+
+                    const minLogMC = Math.min(...logMcValues.filter(v => v > 0))  // 只用非零值计算最小值
+                    const maxLogMC = Math.max(...logMcValues)
+                    
+                    console.log('MC Values Summary:', {
+                        total: mcValues.length,
+                        zeros: mcValues.filter(v => v === 0).length,
+                        nonZeros: mcValues.filter(v => v > 0).length
+                    })
+                    
+                    console.log('Original MC value range:', {
+                        min: Math.pow(10, minLogMC),
+                        max: Math.pow(10, maxLogMC)
+                    })
+                    console.log('Log10 MC value range:', { minLogMC, maxLogMC })
                     
                     // 显示图例
                     this.showLegend = true
-                    this.minMC = minMC
-                    this.maxMC = maxMC
+                    this.minMC = Math.pow(10, minLogMC)
+                    this.maxMC = Math.pow(10, maxLogMC)
 
                     // 更新现有实体的颜色
                     const entities = this.currentGeoJsonDataSource.entities.values
                     entities.forEach((entity, index) => {
                         if (entity && entity.polyline) {
                             const mcValue = geojsonData.features[index].properties[mcField]
-                            const normalizedValue = (mcValue - minMC) / (maxMC - minMC)
                             
-                            const color = Cesium.Color.fromHsl(
-                                (1 - normalizedValue) * 0.6, // hue: 0.6(蓝) -> 0(红)
-                                1.0,  // saturation
-                                0.5,  // lightness
-                                1.0   // alpha
-                            )
-                            
-                            entity.polyline.material = new Cesium.ColorMaterialProperty(color)
+                            if (mcValue === 0) {
+                                // 零值使用特定颜色（比如深蓝色）
+                                entity.polyline.material = new Cesium.ColorMaterialProperty(
+                                    Cesium.Color.DARKBLUE
+                                )
+                            } else {
+                                // 非零值使用对数渐变色
+                                const logValue = Math.log10(mcValue)
+                                const normalizedValue = (logValue - minLogMC) / (maxLogMC - minLogMC)
+                                
+                                const color = Cesium.Color.fromHsl(
+                                    (1 - normalizedValue) * 0.6, // hue: 0.6(蓝) -> 0(红)
+                                    1.0,  // saturation
+                                    0.5,  // lightness
+                                    1.0   // alpha
+                                )
+                                
+                                entity.polyline.material = new Cesium.ColorMaterialProperty(color)
+                            }
                         }
                     })
 
@@ -566,17 +621,368 @@
                     console.error('Error in handleTopologyResult:', error)
                 }
             },
-            handleCalculationComplete(radius) {
-                console.log('MapViewer received calculation-complete with radius:', radius)
-                this.pendingRadius = radius
-                this.currentRadii = radius
-                
-                this.$nextTick(() => {
-                    console.log('Showing statistics panel with radius:', this.currentRadii)
-                    this.statisticsType = 'static'
+            handleCalculationComplete() {
+                const type = this.calculationType === 'single' ? 'static' : 'dynamic'
+                this.calculationResults[type] = true
+            },
+            handleViewResults(type) {
+                if (this.calculationResults[type]) {
+                    this.statisticsType = type
                     this.showStatisticsPanel = true
-                })
-            }
+                    // 确保 StatisticsPanel 组件知道要显示哪种类型
+                    if (this.$refs.statisticsPanel) {
+                        this.$refs.statisticsPanel.enableCalculationType(type)
+                    }
+                }
+            },
+            async handleTimePointChange(data) {
+                try {
+                    await this.handleDynamicNetworkUpdate(data.geojsonData);
+                } catch (error) {
+                    console.error('Error updating network display:', error);
+                    ElMessage.error('Failed to update network display');
+                }
+            },
+            async handleDynamicNetworkUpdate(geojsonData) {
+                try {
+                    // 创建新的数据源
+                    const dataSource = new Cesium.GeoJsonDataSource('dynamicNetwork');
+                    
+                    await dataSource.load(geojsonData, {
+                        stroke: new Cesium.Color(0, 0, 1, 1),
+                        strokeWidth: 3,
+                        fill: new Cesium.Color(0, 0, 1, 0.1),
+                        clampToGround: false
+                    });
+
+                    // 移除之前的动态网络数据源（如果存在）
+                    if (this.dynamicNetworkDataSource) {
+                        await this.viewer.dataSources.remove(this.dynamicNetworkDataSource);
+                    }
+
+                    // 添加新的数据源
+                    await this.viewer.dataSources.add(dataSource);
+                    this.dynamicNetworkDataSource = dataSource;
+
+                    // 更新样式
+                    const mcField = `MC_${this.topologyStore.currentRadius}`;
+                    const entities = dataSource.entities.values;
+                    
+                    if (entities && entities.length > 0) {
+                        const mcValues = geojsonData.features.map(f => f.properties[mcField]);
+                        const minMC = Math.min(...mcValues);
+                        const maxMC = Math.max(...mcValues);
+
+                        entities.forEach((entity, index) => {
+                            if (entity && entity.polyline) {
+                                const mcValue = geojsonData.features[index].properties[mcField];
+                                const normalizedValue = (mcValue - minMC) / (maxMC - minMC);
+                                
+                                const color = Cesium.Color.fromHsl(
+                                    (1 - normalizedValue) * 0.6,
+                                    1.0,
+                                    0.5,
+                                    1.0
+                                );
+                                
+                                entity.polyline.width = 2;
+                                entity.polyline.material = new Cesium.ColorMaterialProperty(color);
+                            }
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error in handleDynamicNetworkUpdate:', error);
+                    ElMessage.error('Failed to update dynamic network');
+                }
+            },
+            // 处理静态计算按钮点击
+            async handleStaticCalculation() {
+                this.statisticsType = 'static'
+                this.showStatisticsPanel = true
+                if (this.$refs.statisticsPanel) {
+                    this.$refs.statisticsPanel.enableCalculationType('static')
+                }
+            },
+
+            // 处理动态计算按钮点击
+            async handleDynamicCalculation() {
+                this.statisticsType = 'dynamic'
+                this.showStatisticsPanel = true
+                if (this.$refs.statisticsPanel) {
+                    this.$refs.statisticsPanel.enableCalculationType('dynamic')
+                }
+            },
+
+            // 添加 loadTimePoints 方法
+            async loadTimePoints() {
+                if (!this.projectId) {
+                    console.warn('No project ID available');
+                    return;
+                }
+
+                try {
+                    const response = await axios.get('/api/topology/dynamic_networks', {
+                        params: { project_id: this.projectId }
+                    });
+                    
+                    if (response.data.status === 'success' && this.$refs.statisticsPanel) {
+                        // 确保组件已挂载并且方法存在
+                        const panel = this.$refs.statisticsPanel;
+                        if (typeof panel.updateTimePoints === 'function') {
+                            panel.updateTimePoints(response.data.timePoints);
+                        } else {
+                            console.warn('updateTimePoints method not found on statisticsPanel');
+                        }
+                    } else {
+                        console.warn('Statistics panel not ready or invalid response');
+                    }
+                } catch (error) {
+                    console.error('Error loading time points:', error);
+                    ElMessage.error('Failed to load time points');
+                }
+            },
+
+            // 新增：加载交通流量网络
+            async loadTrafficNetwork(geojsonData) {
+                try {
+                    console.log('Loading traffic network...');
+                    
+                    await this.clearAllDataSources();
+                    
+                    const dataSource = new Cesium.GeoJsonDataSource('trafficNetwork');
+                    
+                    await dataSource.load(geojsonData, {
+                        stroke: new Cesium.Color(0.8, 0.8, 0.8, 1.0),
+                        strokeWidth: 2,
+                        clampToGround: true
+                    });
+
+                    const entities = dataSource.entities.values;
+                    console.log(`Processing ${entities.length} entities...`);
+                    
+                    entities.forEach((entity, index) => {
+                        if (entity && entity.polyline) {
+                            // 确保每个实体都有正确的ID
+                            const roadId = geojsonData.features[index].properties.id;
+                            entity.properties = entity.properties || {};
+                            entity.properties.id = new Cesium.ConstantProperty(roadId);
+                            
+                            // 设置初始样式
+                            entity.polyline.width = new Cesium.ConstantProperty(2);
+                            entity.polyline.material = new Cesium.ColorMaterialProperty(
+                                new Cesium.Color(0.8, 0.8, 0.8, 1.0)
+                            );
+                            entity.polyline.show = new Cesium.ConstantProperty(true);
+                            
+                            // 确保线条贴地
+                            entity.polyline.clampToGround = true;
+                        }
+                    });
+
+                    this.trafficDataSource = dataSource;
+                    await this.viewer.dataSources.add(dataSource);
+                    
+                    console.log('Traffic network loaded successfully');
+                    
+                    // 验证数据
+                    const sampleEntity = entities[0];
+                    if (sampleEntity) {
+                        console.log('Sample entity:', {
+                            id: sampleEntity.properties?.id?.getValue(),
+                            hasPolyline: !!sampleEntity.polyline,
+                            material: sampleEntity.polyline?.material
+                        });
+                    }
+                    
+                } catch (error) {
+                    console.error('Error loading traffic network:', error);
+                    ElMessage.error('Failed to load traffic network');
+                }
+            },
+
+            // 更新交通流量可视化
+            async updateTrafficVisualization() {
+                if (!this.trafficDataSource) {
+                    console.warn('No traffic data source available');
+                    return;
+                }
+
+                try {
+                    const entities = this.trafficDataSource.entities.values;
+                    const currentTimePoint = this.mapStore.currentTimePoint;
+                    console.log(`Updating traffic for time ${currentTimePoint}, total entities: ${entities.length}`);
+                    
+                    let updatedCount = 0;
+                    // 遍历所有实体并更新
+                    for (const entity of entities) {
+                        if (entity && entity.polyline) {
+                            const roadId = entity.properties?.id?.getValue();
+                            if (!roadId) continue;
+
+                            // 获取当前时间点的交通流量
+                            const trafficValue = this.mapStore.trafficData?.[roadId]?.[currentTimePoint];
+                            if (typeof trafficValue !== 'number') {
+                                // console.warn(`No traffic data for road ${roadId} at time ${currentTimePoint}`);
+                                continue;
+                            }
+
+                            // 计算颜色和宽度
+                            const color = this.mapStore.getTrafficColor(trafficValue);
+                            const width = this.mapStore.getTrafficWidth(trafficValue);
+
+                            // 创建新的颜色实例
+                            let cesiumColor;
+                            if (color.startsWith('hsl')) {
+                                const hslMatch = color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+                                if (hslMatch) {
+                                    const [, h, s, l] = hslMatch;
+                                    const rgb = this.hslToRgb(h/360, s/100, l/100);
+                                    cesiumColor = new Cesium.Color(rgb.r, rgb.g, rgb.b, 1.0);
+                                }
+                            } else if (color.startsWith('#')) {
+                                cesiumColor = Cesium.Color.fromCssColorString(color);
+                            }
+
+                            if (cesiumColor) {
+                                // 更新实体的颜色和宽度
+                                entity.polyline.material = new Cesium.ColorMaterialProperty(cesiumColor);
+                                entity.polyline.width = new Cesium.ConstantProperty(width);
+                                updatedCount++;
+                            }
+                        }
+                    }
+
+                    console.log(`Updated ${updatedCount} entities for time ${currentTimePoint}`);
+                    
+                    // 强制场景刷新
+                    this.viewer.scene.requestRender();
+                    
+                } catch (error) {
+                    console.error('Error updating traffic visualization:', error);
+                }
+            },
+
+            // 添加 HSL 到 RGB 的转换函数
+            hslToRgb(h, s, l) {
+                let r, g, b;
+
+                if (s === 0) {
+                    r = g = b = l; // achromatic
+                } else {
+                    const hue2rgb = (p, q, t) => {
+                        if (t < 0) t += 1;
+                        if (t > 1) t -= 1;
+                        if (t < 1/6) return p + (q - p) * 6 * t;
+                        if (t < 1/2) return q;
+                        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                        return p;
+                    };
+
+                    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                    const p = 2 * l - q;
+                    r = hue2rgb(p, q, h + 1/3);
+                    g = hue2rgb(p, q, h);
+                    b = hue2rgb(p, q, h - 1/3);
+                }
+
+                return { r, g, b };
+            },
+
+            // 新增：清除交通流量显示
+            clearTrafficVisualization() {
+                if (this.trafficDataSource) {
+                    this.viewer.dataSources.remove(this.trafficDataSource);
+                    this.trafficDataSource = null;
+                }
+            },
+
+            // 将清除方法暴露给外部
+            async clearAllDataSources() {
+                try {
+                    console.log('Clearing all data sources...');
+                    
+                    // 清除拓扑分析数据
+                    if (this.currentGeoJsonDataSource) {
+                        await this.viewer.dataSources.remove(this.currentGeoJsonDataSource);
+                        this.currentGeoJsonDataSource = null;
+                    }
+                    
+                    // 清除动态网络数据
+                    if (this.dynamicNetworkDataSource) {
+                        await this.viewer.dataSources.remove(this.dynamicNetworkDataSource);
+                        this.dynamicNetworkDataSource = null;
+                    }
+                    
+                    // 清除交通数据
+                    if (this.trafficDataSource) {
+                        await this.viewer.dataSources.remove(this.trafficDataSource);
+                        this.trafficDataSource = null;
+                    }
+                    
+                    // 隐藏图例
+                    this.showLegend = false;
+                    
+                    console.log('All data sources cleared');
+                } catch (error) {
+                    console.error('Error clearing data sources:', error);
+                }
+            },
+
+            // 添加缓存初始化方法
+            async initTrafficDataCache() {
+                if (!this.trafficDataSource || !this.mapStore.trafficData || !this.mapStore.currentTimePoint) {
+                    return;
+                }
+
+                try {
+                    console.log('Initializing traffic data cache...');
+                    const entities = this.trafficDataSource.entities.values;
+                    const timePoints = Object.keys(Object.values(this.mapStore.trafficData)[0] || {})
+                        .filter(key => key.startsWith('traffic_'));
+
+                    // 为每个实体和时间点创建缓存
+                    this.trafficDataCache = new Map();
+
+                    entities.forEach(entity => {
+                        if (entity && entity.polyline) {
+                            const roadId = entity.properties?.id?.getValue();
+                            if (!roadId) return;
+
+                            const roadCache = new Map();
+                            timePoints.forEach(timePoint => {
+                                const trafficValue = this.mapStore.trafficData[roadId][timePoint];
+                                const traffic = typeof trafficValue === 'number' ? trafficValue : 0;
+                                const color = this.mapStore.getTrafficColor(traffic);
+                                const width = this.mapStore.getTrafficWidth(traffic);
+
+                                let cesiumColor;
+                                if (color.startsWith('hsl')) {
+                                    const hslMatch = color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+                                    if (hslMatch) {
+                                        const [, h, s, l] = hslMatch;
+                                        const rgb = this.hslToRgb(h/360, s/100, l/100);
+                                        cesiumColor = new Cesium.Color(rgb.r, rgb.g, rgb.b, 1.0);
+                                    }
+                                } else if (color.startsWith('#')) {
+                                    cesiumColor = Cesium.Color.fromCssColorString(color);
+                                }
+
+                                roadCache.set(timePoint, {
+                                    cesiumColor,
+                                    width: new Cesium.ConstantProperty(width)
+                                });
+                            });
+
+                            this.trafficDataCache.set(roadId, roadCache);
+                        }
+                    });
+
+                    console.log('Traffic data cache initialized');
+                    
+                } catch (error) {
+                    console.error('Error initializing traffic data cache:', error);
+                }
+            },
         },
         computed: {
             showTopologyPanel() {
@@ -587,6 +993,9 @@
             },
             showIndexPanel() {
                 return this.activePanel === 'index'
+            },
+            isDynamicMode() {
+                return this.statisticsType === 'dynamic'
             }
         },
         watch: {
@@ -607,6 +1016,34 @@
             },
             pendingRadius(newVal) {
                 console.log('pendingRadius updated to:', newVal)
+            },
+            isDynamicMode: {
+                immediate: true,
+                async handler(newVal) {
+                    if (newVal && this.projectId) {
+                        // 添加延迟确保组件已挂载
+                        await nextTick();
+                        if (this.$refs.statisticsPanel) {
+                            await this.loadTimePoints();
+                        } else {
+                            console.warn('Statistics panel not mounted yet');
+                        }
+                    }
+                }
+            },
+            activePanel: {
+                immediate: true,
+                async handler(newPanel, oldPanel) {
+                    if (newPanel !== oldPanel) {
+                        // 当面板切换时，清除所有数据
+                        // await this.clearAllDataSources();
+                        
+                        // 如果切换到交通模拟面板，初始化交通数据
+                        if (newPanel === 'transportation' && this.projectId) {
+                            // 可以在这里添加初始化交通模拟的逻辑
+                        }
+                    }
+                }
             }
         }
     }
@@ -675,6 +1112,71 @@
     }
     
     .legend-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        color: #666;
+        margin-top: 4px;
+    }
+
+    .traffic-legend {
+        position: absolute;
+        top: 760px;
+        left: 480px;
+        background: white;
+        padding: 10px;
+        border-radius: 4px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        z-index: 1;
+    }
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        margin: 5px 0;
+    }
+
+    .legend-color {
+        width: 20px;
+        height: 4px;
+        margin-right: 8px;
+        border-radius: 2px;
+    }
+
+    h4 {
+        margin: 0 0 8px 0;
+        font-size: 14px;
+        color: #333;
+    }
+
+    .traffic-flow-legend {
+        position: fixed;
+        left: 480px;
+        top: 780px;
+        background: rgba(255, 255, 255, 0.95);
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        z-index: 1000;
+        width: 200px;
+    }
+
+    .flow-gradient {
+        width: 100%;
+        height: 20px;
+        background: linear-gradient(to right,
+            #ccc,  /* 0 traffic */
+            hsl(240, 100%, 50%),  /* 深蓝色 */
+            hsl(180, 100%, 50%),  /* 青色 */
+            hsl(120, 100%, 50%),  /* 绿色 */
+            hsl(60, 100%, 50%),   /* 黄色 */
+            hsl(0, 100%, 50%)     /* 红色 */
+        );
+        border-radius: 4px;
+        margin: 5px 0;
+    }
+
+    .flow-labels {
         display: flex;
         justify-content: space-between;
         font-size: 12px;

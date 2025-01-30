@@ -100,11 +100,36 @@
                         Calculation
                     </el-button>
                 </div>
-                <div>
+                <!-- <div>
                     <el-button class="simulation-btn" type="info">Simulation</el-button>
-                </div>
-                <div>
-                    <el-button class="view-result-btn" disabled>View Result</el-button>
+                </div> -->
+                <div class="calculation-buttons">
+                    <el-dropdown 
+                        v-if="hasStaticResults || hasDynamicResults"
+                        @command="handleViewResults"
+                        trigger="click"
+                    >
+                        <el-button type="default" class="view-result-btn">
+                            View Results
+                            <el-icon class="el-icon--right"><arrow-down /></el-icon>
+                        </el-button>
+                        <template #dropdown>
+                            <el-dropdown-menu>
+                                <el-dropdown-item 
+                                    command="static"
+                                    :disabled="!hasStaticResults"
+                                >
+                                    Static Results
+                                </el-dropdown-item>
+                                <el-dropdown-item 
+                                    command="dynamic"
+                                    :disabled="!hasDynamicResults"
+                                >
+                                    Dynamic Results
+                                </el-dropdown-item>
+                            </el-dropdown-menu>
+                        </template>
+                    </el-dropdown>
                 </div>
             </div>
 
@@ -122,8 +147,8 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { ElButton, ElCheckbox, ElTooltip, ElMessage } from 'element-plus'
-import { InfoFilled } from '@element-plus/icons-vue'
+import { ElButton, ElCheckbox, ElTooltip, ElMessage, ElDropdown, ElDropdownMenu, ElDropdownItem } from 'element-plus'
+import { InfoFilled, ArrowDown } from '@element-plus/icons-vue'
 import 'element-plus/es/components/button/style/css'
 import 'element-plus/es/components/checkbox/style/css'
 import 'element-plus/es/components/tooltip/style/css'
@@ -157,6 +182,10 @@ const emit = defineEmits(['close', 'showStatistics', 'updateGeojson', 'projectId
 // 添加状态
 const showCalculationProgress = ref(false)
 const calculationType = ref('single') // or 'sequence'
+
+// 分别追踪静态和动态计算结果
+const hasStaticResults = ref(false)
+const hasDynamicResults = ref(false)
 
 // 计算属性来控制按钮的启用状态
 const canCalculateStatic = computed(() => {
@@ -301,9 +330,20 @@ const triggerFileUpload = () => {
     input.click()
 }
 
-// 添加计算完成的处理函数
+// 修改计算完成的处理函数
 const handleCalculationComplete = () => {
+    if (calculationType.value === 'single') {
+        hasStaticResults.value = true
+    } else {
+        hasDynamicResults.value = true
+    }
+    // 自动显示统计面板
     emit('showStatistics', calculationType.value === 'single' ? 'static' : 'dynamic')
+}
+
+// 保留查看结果的处理函数
+const handleViewResults = (type) => {
+    emit('showStatistics', type)
 }
 </script>
 
@@ -442,5 +482,20 @@ h5 {
     color: #909399;
     font-size: 16px;
     cursor: help;
+}
+
+.calculation-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.view-result-btn {
+    width: 100%;
+}
+
+:deep(.el-dropdown) {
+    width: 100%;
+    display: block;
 }
 </style> 

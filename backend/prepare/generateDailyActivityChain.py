@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 import logging
 from datetime import datetime
-
+import shutil
 def setup_logger(output_dir):
     """
     设置日志记录器
@@ -63,12 +63,16 @@ def generate_daily_activity_chain(input_dir, output_dir):
         # 获取jar文件和index文件的路径
         jar_path = current_dir / "matsim_preparation_jar" / "generate_demand" / "matsim_preparation.jar"
         index_path = current_dir / "matsim_preparation_jar" / "indexCalculation.xml"
-        
+
+        event_path = current_dir / "matsim_preparation_jar" / "networkChangeEvents.xml"
+        shutil.copy(event_path,os.path.join(output_dir,"networkChangeEvents.xml"))
         # 确保文件存在
         if not jar_path.exists():
             raise FileNotFoundError(f"找不到jar文件: {jar_path}")
         if not index_path.exists():
             raise FileNotFoundError(f"找不到index文件: {index_path}")
+        if not event_path.exists():
+            raise FileNotFoundError(f"找不到config文件: {event_path}")
             
         # 确保输入文件存在
         input_dir = Path(input_dir)

@@ -6,6 +6,32 @@
         </div>
         
         <div class="panel-content">
+            <!-- 添加计算类型选择器 -->
+            <div class="calculation-type-selector">
+                <h3>Calculation Type</h3>
+                <el-select v-model="calculationType" @change="handleCalculationTypeChange">
+                    <el-option
+                        v-for="type in calculationTypes"
+                        :key="type.value"
+                        :label="type.label"
+                        :value="type.value"
+                    />
+                </el-select>
+            </div>
+
+            <!-- 时间选择器（仅在 dynamic 模式下显示） -->
+            <div v-if="calculationType === 'dynamic'" class="time-selector">
+                <h3>Time Point Selection</h3>
+                <el-select v-model="selectedTimePoint" @change="handleTimePointChange">
+                    <el-option
+                        v-for="time in timePoints"
+                        :key="time"
+                        :label="`Time: ${time}`"
+                        :value="time"
+                    />
+                </el-select>
+            </div>
+
             <!-- 基础信息部分 -->
             <div class="basic-info">
                 <h3>Basic Information</h3>
@@ -18,8 +44,8 @@
                     <h4>Results:</h4>
                     <p>Network Statistics:</p>
                     <p>Total Roads: {{ basicStats.totalRoads }}</p>
-                    <p>Network Area: {{ basicStats.networkArea.toFixed(2) }} km²</p>
-                    <p>Network Density: {{ basicStats.networkDensity.toFixed(2) }} km/km²</p>
+                    <!-- <p>Network Area: {{ basicStats.networkArea.toFixed(2) }} km²</p>
+                    <p>Network Density: {{ basicStats.networkDensity.toFixed(2) }} m/km²</p> -->
                     <!-- <p>Diameter: {{ basicStats.diameter }}</p>
                     <p>Radius: {{ basicStats.radius }}</p>
                     <p>Average Path length: {{ basicStats.avgPathLength }}</p> -->
@@ -48,9 +74,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
-import axios from 'axios'
+import axios from '@/utils/axios'
 import { ElMessage } from 'element-plus'
 import { useTopologyStore } from '@/stores/topology'
 import { storeToRefs } from 'pinia'
@@ -60,27 +86,33 @@ const props = defineProps({
         type: String,
         required: true
     },
-    hasDynamicData: {
-        type: Boolean,
-        default: false
-    },
     projectId: {
         type: String,
         required: true
     },
     radius: {
-        type: [String, Number],
-        default: '100'
+        type: Number,
+        required: true
     }
 })
 
-const emit = defineEmits(['close', 'geojsonUpdated', 'topology-result'])
+const emit = defineEmits(['close', 'topology-result', 'time-point-changed'])
 
 const topologyStore = useTopologyStore()
 const { currentRadius } = storeToRefs(topologyStore)
 
 const mcScatterChart = ref(null)
 const histogramChart = ref(null)
+let mcChartInstance = null  // 添加图表实例引用
+let histogramChartInstance = null  // 添加图表实例引用
+const isComponentMounted = ref(false)  // 添加组件挂载状态标志
+
+const selectedTimePoint = ref(null)
+const timePoints = ref([])
+
+// 添加计算类型相关的响应式变量
+const calculationType = ref(props.type)
+const availableTypes = ref(new Set([props.type]))
 
 // 添加一个 watch 来调试
 watch(() => props.radius, (newRadius) => {
@@ -93,6 +125,17 @@ const mcField = computed(() => {
     return `MC_${currentRadius.value}`
 })
 
+const calculationTypes = computed(() => {
+    const types = []
+    if (availableTypes.value.has('static')) {
+        types.push({ label: 'Static Analysis', value: 'static' })
+    }
+    if (availableTypes.value.has('dynamic')) {
+        types.push({ label: 'Dynamic Analysis', value: 'dynamic' })
+    }
+    return types
+})
+
 const basicStats = ref({
     diameter: (Math.random() * 10).toFixed(2),
     radius: (Math.random() * 5).toFixed(2),
@@ -103,14 +146,21 @@ const basicStats = ref({
 })
 
 const calculateNetworkStats = (geojsonData) => {
+    console.log('Calculating network stats...');
     // 计算道路总数
     const totalRoads = geojsonData.features.length
+    console.log('Total roads:', totalRoads);
 
     // 计算边界框
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
     let totalLength = 0
 
     geojsonData.features.forEach(feature => {
+        if (!feature.geometry || !feature.geometry.coordinates) {
+            console.warn('Invalid feature:', feature);
+            return;
+        }
+        
         const coords = feature.geometry.coordinates
         coords.forEach(coord => {
             minX = Math.min(minX, coord[0])
@@ -129,11 +179,21 @@ const calculateNetworkStats = (geojsonData) => {
     })
 
     // 计算面积（平方米转换为平方公里）
+    console.log('Calculating area...');
+    console.log('maxX:', maxX, 'minX:', minX, 'maxY:', maxY, 'minY:', minY);
     const area = ((maxX - minX) * (maxY - minY)) / 1000000
+    
     
     // 计算密度（公里/平方公里）
     const density = (totalLength / 1000) / area
 
+    console.log('New stats:', {
+        totalRoads,
+        networkArea: area,
+        networkDensity: density
+    });
+
+    // 使用 Vue 的响应式更新
     basicStats.value = {
         ...basicStats.value,
         totalRoads,
@@ -143,154 +203,308 @@ const calculateNetworkStats = (geojsonData) => {
 }
 
 const updateMCScatterChart = (geojsonData) => {
-    if (!mcScatterChart.value) return
+    if (!isComponentMounted.value || !mcScatterChart.value || !geojsonData?.features) {
+        console.log('Skipping MC chart update - component not ready');
+        return;
+    }
     
-    const mcValues = geojsonData.features.map(feature => ({
-        value: [feature.properties.CurveId, feature.properties[mcField.value]]
-    }))
-
-    const chart = echarts.init(mcScatterChart.value)
-    chart.setOption({
-        grid: {
-            top: 30,
-            right: 20,
-            bottom: 30,
-            left: 50
-        },
-        tooltip: {
-            trigger: 'item',
-            formatter: function(params) {
-                return `Road ID: ${params.value[0]}<br/>Betweenness: ${params.value[1]}`
-            }
-        },
-        xAxis: {
-            type: 'value',
-            name: 'Road ID'
-        },
-        yAxis: {
-            type: 'value',
-            name: 'Betweenness'
-        },
-        series: [{
-            data: mcValues,
-            type: 'scatter',
-            symbolSize: 5,
-            itemStyle: {
-                color: '#5470C6'
-            }
-        }]
-    })
-}
-
-const updateHistogram = (geojsonData) => {
-    if (!histogramChart.value) return
-
-    // 获取所有MC值，使用动态字段名
-    const mcValues = geojsonData.features.map(feature => feature.properties[mcField.value])
-    
-    // 计算直方图数据
-    const binCount = 20  // 直方图柱子数量
-    const minValue = Math.min(...mcValues)
-    const maxValue = Math.max(...mcValues)
-    const binWidth = (maxValue - minValue) / binCount
-    
-    // 初始化bins
-    const bins = new Array(binCount).fill(0)
-    
-    // 统计每个bin的数量
-    mcValues.forEach(value => {
-        const binIndex = Math.min(
-            Math.floor((value - minValue) / binWidth),
-            binCount - 1
-        )
-        bins[binIndex]++
-    })
-    
-    // 生成x轴标签
-    const xAxisData = bins.map((_, index) => {
-        const binStart = (minValue + index * binWidth).toFixed(2)
-        return binStart
-    })
-
-    const chart = echarts.init(histogramChart.value)
-    chart.setOption({
-        grid: {
-            top: 30,
-            right: 20,
-            bottom: 30,
-            left: 50
-        },
-        tooltip: {
-            trigger: 'item',
-            formatter: function(params) {
-                const binStart = parseFloat(params.name)
-                const binEnd = (binStart + binWidth).toFixed(2)
-                return `Range: ${params.name} - ${binEnd}<br/>Count: ${params.value}`
-            }
-        },
-        xAxis: {
-            type: 'category',
-            name: 'Betweenness',
-            data: xAxisData,
-            axisLabel: {
-                rotate: 45,
-                interval: Math.floor(binCount / 5)
-            }
-        },
-        yAxis: {
-            type: 'value',
-            name: 'Frequency'
-        },
-        series: [{
-            data: bins,
-            type: 'bar',
-            barWidth: '99%',
-            itemStyle: {
-                color: '#91cc75'
-            }
-        }]
-    })
-}
-
-const loadGeojsonData = async () => {
     try {
-        const projectId = props.projectId
-        const url = `/api/topology/network?project_id=${projectId}`
-        const response = await axios.get(url)
-        
-        if (response.data.status === 'error') {
-            console.error('Server error:', response.data.message)
-            ElMessage.error(response.data.message)
-            emit('close')
-            return
+        // 销毁旧实例
+        if (mcChartInstance) {
+            mcChartInstance.dispose()
         }
         
-        const geojsonData = response.data
-        
-        // 使用注入的 radius 值
-        if (!geojsonData.features.some(f => mcField.value in f.properties)) {
-            console.error(`No ${mcField.value} values found in the data`)
-            ElMessage.error('Topology calculation results not available')
-            emit('close')
-            return
-        }
+        // 创建新实例
+        mcChartInstance = echarts.init(mcScatterChart.value)
+        const mcValues = geojsonData.features.map(feature => ({
+            value: [feature.properties.CurveId, feature.properties[mcField.value]]
+        }))
 
-        calculateNetworkStats(geojsonData)
-        updateMCScatterChart(geojsonData)
-        updateHistogram(geojsonData)
-        
-        emit('topology-result', geojsonData)
-        
+        mcChartInstance.setOption({
+            grid: {
+                top: 30,
+                right: 20,
+                bottom: 30,
+                left: 50
+            },
+            tooltip: {
+                trigger: 'item',
+                formatter: function(params) {
+                    return `Road ID: ${params.value[0]}<br/>Betweenness: ${params.value[1]}`
+                }
+            },
+            xAxis: {
+                type: 'value',
+                name: 'Road ID'
+            },
+            yAxis: {
+                type: 'value',
+                name: 'Betweenness'
+            },
+            series: [{
+                data: mcValues,
+                type: 'scatter',
+                symbolSize: 5,
+                itemStyle: {
+                    color: '#5470C6'
+                }
+            }]
+        })
     } catch (error) {
-        console.error('Error loading data:', error)
-        ElMessage.error(error.response?.data?.message || 'Failed to load data')
-        emit('close')
+        console.error('Error updating MC scatter chart:', error)
     }
 }
 
-onMounted(() => {
-    loadGeojsonData()
+const updateHistogram = (geojsonData) => {
+    if (!isComponentMounted.value || !histogramChart.value || !geojsonData?.features) {
+        console.log('Skipping histogram update - component not ready');
+        return;
+    }
+    
+    try {
+        // 销毁旧实例
+        if (histogramChartInstance) {
+            histogramChartInstance.dispose()
+        }
+        
+        // 创建新实例
+        histogramChartInstance = echarts.init(histogramChart.value)
+        
+        // 获取所有MC值，使用动态字段名
+        const mcValues = geojsonData.features.map(feature => feature.properties[mcField.value])
+        
+        // 计算直方图数据
+        const binCount = 20  // 直方图柱子数量
+        const minValue = Math.min(...mcValues)
+        const maxValue = Math.max(...mcValues)
+        const binWidth = (maxValue - minValue) / binCount
+        
+        // 初始化bins
+        const bins = new Array(binCount).fill(0)
+        
+        // 统计每个bin的数量
+        mcValues.forEach(value => {
+            const binIndex = Math.min(
+                Math.floor((value - minValue) / binWidth),
+                binCount - 1
+            )
+            bins[binIndex]++
+        })
+        
+        // 生成x轴标签
+        const xAxisData = bins.map((_, index) => {
+            const binStart = (minValue + index * binWidth).toFixed(2)
+            return binStart
+        })
+
+        histogramChartInstance.setOption({
+            grid: {
+                top: 30,
+                right: 20,
+                bottom: 30,
+                left: 50
+            },
+            tooltip: {
+                trigger: 'item',
+                formatter: function(params) {
+                    const binStart = parseFloat(params.name)
+                    const binEnd = (binStart + binWidth).toFixed(2)
+                    return `Range: ${params.name} - ${binEnd}<br/>Count: ${params.value}`
+                }
+            },
+            xAxis: {
+                type: 'category',
+                name: 'Betweenness',
+                data: xAxisData,
+                axisLabel: {
+                    rotate: 45,
+                    interval: Math.floor(binCount / 5)
+                }
+            },
+            yAxis: {
+                type: 'value',
+                name: 'Frequency'
+            },
+            series: [{
+                data: bins,
+                type: 'bar',
+                barWidth: '99%',
+                itemStyle: {
+                    color: '#91cc75'
+                }
+            }]
+        })
+    } catch (error) {
+        console.error('Error updating histogram:', error)
+    }
+}
+
+const loadTimePoints = async () => {
+    try {
+        console.log('Loading time points for project:', props.projectId)
+        const response = await axios.get('/api/topology/dynamic_networks', {
+            params: { project_id: props.projectId }
+        })
+        if (response.data.status === 'success') {
+            timePoints.value = response.data.timePoints
+            console.log('Loaded time points:', timePoints.value)
+            if (timePoints.value.length > 0) {
+                selectedTimePoint.value = timePoints.value[0]
+                await loadGeojsonData()
+            }
+        }
+    } catch (error) {
+        console.error('Error loading time points:', error)
+        ElMessage.error('Failed to load time points')
+    }
+}
+
+
+const loadGeojsonData = async () => {
+    try {
+        const url = calculationType.value === 'dynamic' 
+            ? '/api/topology/network_at_time'
+            : '/api/topology/network'
+            
+        const params = {
+            project_id: props.projectId,
+            ...(calculationType.value === 'dynamic' && { time: selectedTimePoint.value })
+        }
+        
+        const response = await axios.get(url, { params })
+        if (response.data) {
+            const geojsonData = response.data
+            calculateNetworkStats(geojsonData)
+            updateMCScatterChart(geojsonData)
+            updateHistogram(geojsonData)
+            emit('topology-result', geojsonData)
+        }
+    } catch (error) {
+        console.error('Error loading data:', error)
+        ElMessage.error('Failed to load network data')
+    }
+}
+
+// 处理时间点变化
+const handleTimePointChange = async () => {
+    await loadGeojsonData()
+}
+
+// 修改 updateData 方法
+const updateData = async (geojsonData) => {
+    if (!isComponentMounted.value) {
+        console.log('Component not mounted, skipping update');
+        return;
+    }
+
+    if (!geojsonData?.features) {
+        console.warn('Invalid geojson data received');
+        return;
+    }
+    
+    console.log('TopologyStatisticsPanel updating with new data, features count:', geojsonData.features.length);
+    
+    // 更新统计信息
+    calculateNetworkStats(geojsonData);
+    
+    // 使用 nextTick 确保 DOM 更新完成
+    await nextTick()
+    try {
+        updateMCScatterChart(geojsonData);
+        updateHistogram(geojsonData);
+    } catch (error) {
+        console.error('Error updating charts:', error)
+    }
+}
+
+// 修改 enableCalculationType 函数
+const enableCalculationType = async (type) => {
+    availableTypes.value.add(type)
+    calculationType.value = type
+    
+    // 如果是动态模式，立即加载时间点
+    if (type === 'dynamic') {
+        await loadTimePoints()
+    }
+}
+
+// 修改 handleCalculationTypeChange
+const handleCalculationTypeChange = async (newType) => {
+    console.log('Calculation type changed to:', newType)
+    calculationType.value = newType
+    
+    if (newType === 'dynamic') {
+        if (!timePoints.value.length) {
+            await loadTimePoints()
+        }
+    } else {
+        await loadGeojsonData()
+    }
+}
+
+// 监听初始类型
+watch(() => props.type, (newType) => {
+    if (newType) {
+        enableCalculationType(newType)
+    }
+}, { immediate: true });
+
+// 修改 onMounted 钩子
+onMounted(async () => {
+    console.log('Component mounted');
+    isComponentMounted.value = true
+    await nextTick()
+    
+    try {
+        if (props.type === 'dynamic') {
+            await loadTimePoints()
+        } else {
+            await loadGeojsonData()
+        }
+    } catch (error) {
+        console.error('Error in onMounted:', error)
+    }
 })
+
+// 添加 onUnmounted 钩子
+onUnmounted(() => {
+    console.log('Component unmounting');
+    isComponentMounted.value = false
+    
+    // 清理图表实例
+    if (mcChartInstance) {
+        mcChartInstance.dispose()
+        mcChartInstance = null
+    }
+    if (histogramChartInstance) {
+        histogramChartInstance.dispose()
+        histogramChartInstance = null
+    }
+})
+
+// 添加 updateTimePoints 方法
+const updateTimePoints = (points) => {
+    if (!points || !Array.isArray(points)) {
+        console.warn('Invalid time points data received');
+        return;
+    }
+    
+    console.log('Updating time points:', points);
+    timePoints.value = points;
+    
+    if (points.length > 0) {
+        selectedTimePoint.value = points[0];
+        // 加载第一个时间点的数据
+        loadGeojsonData();
+    }
+};
+
+// 确保所有方法都被正确暴露
+defineExpose({
+    updateData,
+    enableCalculationType,
+    updateTimePoints
+});
 </script>
 
 <style scoped>
@@ -367,5 +581,27 @@ p {
     padding: 10px;
     background: white;
     border-radius: 6px;
+}
+
+.time-selector {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.time-selector h3 {
+    margin-bottom: 10px;
+}
+
+.calculation-type-selector {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.calculation-type-selector h3 {
+    margin-bottom: 10px;
 }
 </style> 

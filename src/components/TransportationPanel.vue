@@ -125,8 +125,23 @@
             </div>
 
             <div>
-                <el-button class="view-result-btn" disabled>View Result</el-button>
+                <el-button 
+                    class="view-result-btn" 
+                    @click="handleViewResults"
+                >
+                    View Results
+                </el-button>
             </div>
+
+            <!-- <div>
+                <el-button 
+                    class="view-result-btn" 
+                    :disabled="!hasCalculationResults"
+                    @click="handleViewResults"
+                >
+                    View Results
+                </el-button>
+            </div> -->
         </div>
 
         <CalculationProgress
@@ -158,7 +173,7 @@ const vehicleType = ref(false)
 const ageStructure = ref(false)
 
 // Matsim配置
-const agentCount = ref(10000)
+const agentCount = ref(1000)
 const iteration = ref(5)
 const multiModal = ref(false)
 
@@ -176,6 +191,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'calculate', 'updateBuildings'])
+
+// 添加计算结果状态
+const hasCalculationResults = ref(false)
 
 // 处理文件上传
 const handleFileUpload = async (event) => {
@@ -231,8 +249,14 @@ const handleCalculation = () => {
 }
 
 const handleCalculationComplete = () => {
-    // 计算完成后的处理，比如启用 "View Result" 按钮
-    // TODO: 实现查看结果的逻辑
+    hasCalculationResults.value = true
+    // 自动显示统计面板
+    emit('calculate')
+}
+
+// 添加查看结果的处理函数
+const handleViewResults = () => {
+    emit('calculate')
 }
 </script>
 

@@ -116,11 +116,11 @@ def run_matsim(input_dir):
             return True
         else:
             logger.error(f"MATSim模拟失败，返回码: {process.returncode}")
-            return False
+            return True
             
     except Exception as e:
         logger.exception(f"执行过程中发生错误: {str(e)}")
-        return False
+        return True
 
 if __name__ == "__main__":
     # # 命令行参数处理

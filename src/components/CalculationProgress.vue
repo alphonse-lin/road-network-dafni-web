@@ -146,7 +146,7 @@ const executeCalculation = async () => {
             statusMessage.value = `Processing ${step.title.toLowerCase()}`
             const response = await axios.post(`http://localhost:5000${step.endpoint}`, {
                 task_id: props.projectId,
-                radii: props.radius?.toString() || '1000'
+                radii: props.radius?.toString() || '100'
             })
             
             if (response.data.status === 'error') {

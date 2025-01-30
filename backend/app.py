@@ -13,6 +13,15 @@ from prepare.dtwmatching import dtw_matching
 from prepare.vulnerabilityCalculation import calculate_vulnerability
 import json
 import sys  # 添加这行
+import geopandas as gpd
+from pyproj import CRS
+import pandas as pd
+from collections import Counter
+import csv
+
+#TODO: 输出直接改成4326的geojson
+#TODO: 在后端计算面积
+#TODO: 后端计算平均路网密度
 
 app = Flask(__name__)
 CORS(app)  # 启用跨域支持
@@ -418,6 +427,265 @@ def get_topology_network():
         print(f"Error in get_topology_network: {str(e)}", file=sys.stderr)  # 修改这行
         import traceback  # 添加这行
         print(traceback.format_exc(), file=sys.stderr)  # 添加这行
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/topology/dynamic_networks', methods=['GET'])
+def get_dynamic_networks():
+    print("=== Starting get_dynamic_networks ===", file=sys.stderr)
+    try:
+        project_id = request.args.get('project_id')
+        if not project_id:
+            return jsonify({'status': 'error', 'message': 'Project ID is required'}), 400
+            
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+        topology_dir = output_dir / '002_topology_calculation'
+        
+        # 查找所有 out_network_{time}.geojson 文件
+        network_files = list(topology_dir.glob('out_network_*.geojson'))
+        
+        # 提取时间点
+        time_points = []
+        for file in network_files:
+            import re
+            match = re.search(r'out_network_h_(\d+)\.geojson', file.name)
+            if match:
+                time_points.append(int(match.group(1)))
+        
+        time_points.sort()  # 确保时间点有序
+        print(f"Found time points: {time_points}", file=sys.stderr)
+        
+        return jsonify({
+            'status': 'success',
+            'timePoints': time_points
+        })
+        
+    except Exception as e:
+        print(f"Error in get_dynamic_networks: {str(e)}", file=sys.stderr)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/topology/network_at_time', methods=['GET'])
+def get_network_at_time():
+    print("=== Starting get_network_at_time ===", file=sys.stderr)
+    try:
+        project_id = request.args.get('project_id')
+        time_point = request.args.get('time')
+        
+        if not project_id or time_point is None:
+            return jsonify({'status': 'error', 'message': 'Project ID and time point are required'}), 400
+            
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+        geojson_path = output_dir / '002_topology_calculation' / f'out_network_h_{time_point}.geojson'
+        
+        print(f"Loading file from: {geojson_path}", file=sys.stderr)
+        
+        if not geojson_path.exists():
+            return jsonify({
+                'status': 'error',
+                'message': f'Network file not found for time point {time_point}'
+            }), 404
+        
+        # 使用 geopandas 读取 GeoJSON
+        gdf = gpd.read_file(geojson_path)
+        print(gdf.count_geometries())
+        
+        # 转换坐标系从 EPSG:27700 到 EPSG:4326
+        gdf = gdf.to_crs(CRS.from_epsg(4326))
+        
+        # 转换回 GeoJSON
+        geojson_data = gdf.__geo_interface__
+        
+        print("Coordinate conversion completed", file=sys.stderr)
+        
+        return jsonify(geojson_data)
+        
+    except Exception as e:
+        print(f"Error in get_network_at_time: {str(e)}", file=sys.stderr)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/transportation/basic-stats', methods=['GET'])
+def get_transportation_basic_stats():
+    try:
+        project_id = request.args.get('project_id')
+        if not project_id:
+            return jsonify({'status': 'error', 'message': 'Project ID is required'}), 400
+            
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+        
+        # 读取 facilities.csv
+        facilities_path = output_dir / '003_matsim_calculation' / 'facilities.csv'
+        facilities_df = pd.read_csv(facilities_path)
+        
+        # 读取 population.csv
+        population_path = output_dir / '003_matsim_calculation' / 'population.csv'
+        population_df = pd.read_csv(population_path)
+        
+        # 1. 计算建筑物总数
+        total_buildings = len(facilities_df)
+        
+        # 2. 计算土地利用分布
+        land_use_distribution = facilities_df['siteType'].value_counts().to_dict()
+        
+        # 3. 计算交通方式分布
+        transport_modes = []
+        for col in ['trans01', 'trans02', 'trans03']:
+            transport_modes.extend(population_df[col].tolist())
+        transport_distribution = Counter(transport_modes)
+        
+        # 4. 计算年龄结构分布
+        age_distribution = population_df['age'].value_counts().to_dict()
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'totalBuildings': total_buildings,
+                'landUseDistribution': [
+                    {'name': k, 'value': v} 
+                    for k, v in land_use_distribution.items()
+                ],
+                'vehicleTypeDistribution': [
+                    {'name': k, 'value': v} 
+                    for k, v in transport_distribution.items()
+                ],
+                'ageStructure': [
+                    {'name': k, 'value': v} 
+                    for k, v in age_distribution.items()
+                ]
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error in get_transportation_basic_stats: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/transportation/simulation-stats', methods=['GET'])
+def get_transportation_simulation_stats():
+    try:
+        project_id = request.args.get('project_id')
+        if not project_id:
+            return jsonify({'status': 'error', 'message': 'Project ID is required'}), 400
+            
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+        matsim_output_dir = output_dir / '003_matsim_calculation' / 'output_traffic'
+        
+        # 1. 读取 Iteration Score 数据
+        scores_file = matsim_output_dir / 'scorestats.txt'
+        scores_data = []
+        with open(scores_file, 'r') as f:
+            next(f)  # 跳过标题行
+            for line in f:
+                iteration, executed, worst, avg, best = line.strip().split('\t')
+                scores_data.append({
+                    'iteration': int(iteration),
+                    'executed': float(executed),
+                    'worst': float(worst),
+                    'avg': float(avg),
+                    'best': float(best)
+                })
+        
+        # 2. 读取 Leg Duration 数据
+        leg_duration_file = matsim_output_dir / 'ITERS' / 'it.5' / '5.legdurations.txt'
+        leg_durations = []
+        with open(leg_duration_file, 'r') as f:
+            headers = next(f).strip().split('\t')  # 获取时间区间
+            for line in f:
+                data = line.strip().split('\t')
+                pattern = data[0]
+                values = [int(x) for x in data[1:]]
+                leg_durations.append({
+                    'pattern': pattern,
+                    'durations': dict(zip(headers[1:], values))
+                })
+        
+        # 3. 读取 Traffic Flow 数据
+        traffic_file = matsim_output_dir / 'ITERS' / 'it.5' / '5.legHistogram.txt'
+        traffic_flow = []
+        with open(traffic_file, 'r') as f:
+            next(f)  # 跳过标题行
+            for line in f:
+                data = line.strip().split('\t')
+                time = data[1]  # 使用秒数而不是时间字符串
+                traffic_flow.append({
+                    'time': int(time),
+                    'departures': int(data[2]),
+                    'arrivals': int(data[3]),
+                    'enRoute': int(data[5])
+                })
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'duration': '24 hours',
+                'iterationScores': scores_data,
+                'legDurations': leg_durations,
+                'trafficFlow': traffic_flow
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error in get_transportation_simulation_stats: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/transportation/road-traffic', methods=['GET'])
+def get_road_traffic_data():
+    try:
+        project_id = request.args.get('project_id')
+        if not project_id:
+            return jsonify({'status': 'error', 'message': 'Project ID is required'}), 400
+            
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+        
+        # 读取道路网络数据
+        road_network_file = input_dir / 'roadnetwork.geojson'
+        gdf = gpd.read_file(road_network_file)
+        
+        # 检查并打印当前坐标系统
+        gdf.set_crs(epsg=27700, inplace=True, allow_override=True)
+        print(gdf.crs)
+        
+        # 强制转换到EPSG:4326
+        gdf = gdf.to_crs(epsg=4326)
+        
+        # 验证转换后的坐标系统
+        print(f"Transformed CRS: {gdf.crs}")
+        
+        # 检查一些坐标值以确保转换正确
+        print("Sample coordinates after transformation:")
+        print(gdf.geometry.iloc[0])
+        
+        # 转换为GeoJSON并确保使用正确的坐标
+        road_network = json.loads(gdf.to_json())
+        
+        # 验证GeoJSON中的坐标
+        sample_coords = road_network['features'][0]['geometry']['coordinates']
+        print(f"Sample coordinates in GeoJSON: {sample_coords}")
+            
+        # 读取交通流量数据
+        traffic_file = output_dir / '004_merged_data' / 'traffic_flow_450s.csv'
+        traffic_data = {}
+        with open(traffic_file, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                link_id = int(row['link_id'])
+                road_id = str(link_id * 2) if link_id > 0 else "0"
+                traffic_data[road_id] = {
+                    k: float(v) for k, v in row.items() 
+                    if k.startswith('traffic_')
+                }
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'roadNetwork': road_network,
+                'trafficData': traffic_data
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error in get_road_traffic_data: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
