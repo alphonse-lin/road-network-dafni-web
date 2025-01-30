@@ -5,15 +5,15 @@ const CopyWebpackPlugin = require('copy-webpack-plugin')
 
 module.exports = defineConfig({
     transpileDependencies: true,
-    // devServer: {
-    //     proxy: {
-    //         '/api': {
-    //             target: 'http://localhost:5000',
-    //             changeOrigin: true,
-    //             secure: false
-    //         }
-    //     }
-    // },
+    devServer: {
+        proxy: {
+            '/api': {
+                target: 'http://localhost:5000',
+                changeOrigin: true,
+                secure: false
+            }
+        }
+    },
     configureWebpack: {
         resolve: {
             fallback: {

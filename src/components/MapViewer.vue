@@ -45,6 +45,7 @@
         :type="statisticsType"
         :hasDynamicData="hasDynamicData"
         :projectId="projectId"
+        :radius="currentRadii"
         @close="closeStatisticsPanel"
         @topology-result="handleTopologyResult"
     />
@@ -52,6 +53,13 @@
         v-if="showIndexStatsPanel"
         :analysis-type="indexAnalysisType"
         @close="closeIndexStatsPanel"
+    />
+    <CalculationProgress
+        v-if="showCalculationProgress"
+        v-model:visible="showCalculationProgress"
+        :mode="calculationType"
+        :projectId="projectId"
+        @calculation-complete="handleCalculationComplete"
     />
     <div v-if="showLegend" class="legend-container">
         <div class="legend-title">Betweenness Centrality</div>
@@ -76,8 +84,11 @@
     import TransportationStatisticsPanel from './TransportationStatisticsPanel.vue'
     import IndexPanel from './IndexPanel.vue'
     import IndexStatisticsPanel from './IndexStatisticsPanel.vue'
+    import CalculationProgress from './CalculationProgress.vue'
     import { ElMessage } from 'element-plus'
     import proj4 from 'proj4'
+    import { ref, inject } from 'vue'
+    import { useTopologyStore } from '@/stores/topology'
     
     // 定义英国国家网格坐标系统 (EPSG:27700)
     proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs");
@@ -93,7 +104,8 @@
             TransportationPanel,
             TransportationStatisticsPanel,
             IndexPanel,
-            IndexStatisticsPanel
+            IndexStatisticsPanel,
+            CalculationProgress
         },
         data() {
             return {
@@ -101,7 +113,7 @@
                 selectedEntity: null,
                 isComputed: false,
                 showStatisticsPanel: false,
-                statisticsType: 'static',
+                statisticsType: '',
                 hasDynamicData: false,
                 showTransportationStatsPanel: false,
                 activePanel: null,
@@ -113,6 +125,19 @@
                 showLegend: false,
                 minMC: 0,
                 maxMC: 1,
+                currentRadii: '100',
+                showCalculationProgress: false,
+                calculationType: 'static',
+                pendingRadius: null,
+            }
+        },
+        setup() {
+            const calculationRadius = inject('calculationRadius', ref('100'))
+            const topologyStore = useTopologyStore()
+            
+            return {
+                calculationRadius,
+                topologyStore
             }
         },
         mounted() {
@@ -149,6 +174,7 @@
             const centerLon = -0.08845;
             const centerLat = 51.51839;
             const offset = 0.02; // 从中心点向四周偏移的距离（以度为单位）
+            
     
             this.londonEntity = this.viewer.entities.add({
                 name: 'London City',
@@ -262,23 +288,18 @@
                 this.closeAllRightPanels();
             },
             handleShowStatistics(type) {
-                if (!this.projectId) {
-                    ElMessage.error('Project ID is not set');
-                    return;
+                console.log('handleShowStatistics called with type:', type)
+                if (this.pendingRadius) {
+                    this.currentRadii = this.pendingRadius
                 }
-                this.statisticsType = type;
-                if (type === 'dynamic') {
-                    this.hasDynamicData = true;
-                    if (this.$refs.statisticsPanel) {
-                        this.$refs.statisticsPanel.selectedStatsType = 'dynamic';
-                    }
-                }
-                this.showStatisticsPanel = true;
-                this.showTransportationStatsPanel = false;
+                console.log('Using radius:', this.currentRadii)
+                
+                this.statisticsType = type
+                this.showStatisticsPanel = true
             },
             closeStatisticsPanel() {
-                console.log('closeStatisticsPanel')
                 this.showStatisticsPanel = false
+                this.pendingRadius = null
             },
             handleTransportation() {
                 if (this.activePanel !== 'transportation') {
@@ -499,44 +520,62 @@
             },
             async handleTopologyResult(geojsonData) {
                 try {
-                    // 确保数据源存在
                     if (!this.currentGeoJsonDataSource) {
-                        console.error('No existing data source to update');
-                        return;
+                        console.error('No existing data source to update')
+                        return
                     }
 
+                    const mcField = `MC_${this.topologyStore.currentRadius}`
+                    console.log('MapViewer: Using MC field:', mcField)
+                    
                     // 计算 MC 值的范围
-                    const mcValues = geojsonData.features.map(f => f.properties.MC_100);
-                    const minMC = Math.min(...mcValues);
-                    const maxMC = Math.max(...mcValues);
+                    const mcValues = geojsonData.features.map(f => {
+                        const value = f.properties[mcField]
+                        if (value === undefined) {
+                            console.warn(`No ${mcField} found in properties:`, f.properties)
+                        }
+                        return value
+                    })
+                    const minMC = Math.min(...mcValues)
+                    const maxMC = Math.max(...mcValues)
                     
                     // 显示图例
-                    this.showLegend = true;
-                    this.minMC = minMC;
-                    this.maxMC = maxMC;
+                    this.showLegend = true
+                    this.minMC = minMC
+                    this.maxMC = maxMC
 
                     // 更新现有实体的颜色
-                    const entities = this.currentGeoJsonDataSource.entities.values;
+                    const entities = this.currentGeoJsonDataSource.entities.values
                     entities.forEach((entity, index) => {
                         if (entity && entity.polyline) {
-                            const mcValue = geojsonData.features[index].properties.MC_100;
-                            const normalizedValue = (mcValue - minMC) / (maxMC - minMC);
+                            const mcValue = geojsonData.features[index].properties[mcField]
+                            const normalizedValue = (mcValue - minMC) / (maxMC - minMC)
                             
                             const color = Cesium.Color.fromHsl(
                                 (1 - normalizedValue) * 0.6, // hue: 0.6(蓝) -> 0(红)
                                 1.0,  // saturation
                                 0.5,  // lightness
                                 1.0   // alpha
-                            );
+                            )
                             
-                            entity.polyline.material = new Cesium.ColorMaterialProperty(color);
+                            entity.polyline.material = new Cesium.ColorMaterialProperty(color)
                         }
-                    });
+                    })
 
                 } catch (error) {
-                    console.error('Error updating topology results:', error);
-                    ElMessage.error('Failed to update topology visualization');
+                    console.error('Error in handleTopologyResult:', error)
                 }
+            },
+            handleCalculationComplete(radius) {
+                console.log('MapViewer received calculation-complete with radius:', radius)
+                this.pendingRadius = radius
+                this.currentRadii = radius
+                
+                this.$nextTick(() => {
+                    console.log('Showing statistics panel with radius:', this.currentRadii)
+                    this.statisticsType = 'static'
+                    this.showStatisticsPanel = true
+                })
             }
         },
         computed: {
@@ -548,6 +587,26 @@
             },
             showIndexPanel() {
                 return this.activePanel === 'index'
+            }
+        },
+        watch: {
+            currentRadii: {
+                immediate: true,
+                handler(newVal, oldVal) {
+                    console.log('currentRadii changed from', oldVal, 'to', newVal)
+                }
+            },
+            showStatisticsPanel: {
+                immediate: true,
+                handler(newVal) {
+                    if (newVal) {
+                        const radius = this.pendingRadius || this.currentRadii
+                        console.log('Opening statistics panel with radius:', radius)
+                    }
+                }
+            },
+            pendingRadius(newVal) {
+                console.log('pendingRadius updated to:', newVal)
             }
         }
     }

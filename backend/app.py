@@ -93,22 +93,27 @@ def api_calculate_space_syntax():
     try:
         data = request.get_json()
         task_id = data.get('task_id')
+        radii = data.get('radii', "100")  # 获取前端传入的半径
+        
         if not task_id:
             return jsonify({'status': 'error', 'message': 'task_id is required'}), 400
             
         task_dir, input_dir, output_dir = ensure_task_directories(task_id)
         
         input_dir = data.get('input_dir', str(output_dir / '001_inundate_roadnetwork'))
-        radii = data.get('radii', "100")
         
         success = calculate_space_syntax_for_each_file(
             input_dir=input_dir,
             output_base_folder=str(output_dir),
-            radii=radii
+            radii=radii  # 使用前端传入的半径
         )
-        print(success)
+        
         if success:
-            return jsonify({'status': 'success', 'message': 'Space syntax calculation completed'})
+            return jsonify({
+                'status': 'success', 
+                'message': 'Space syntax calculation completed',
+                'radii': radii  # 返回使用的半径值
+            })
         else:
             return jsonify({'status': 'error', 'message': 'Space syntax calculation failed'})
             
@@ -120,37 +125,39 @@ def api_calculate_space_syntax_single():
     try:
         data = request.get_json()
         task_id = data.get('task_id')
+        radii = data.get('radii', "100")  # 获取前端传入的半径
+        
         if not task_id:
             return jsonify({'status': 'error', 'message': 'task_id is required'}), 400
             
         task_dir, input_dir, output_dir = ensure_task_directories(task_id)
         
-        # 使用上传的原始 GeoJSON 文件路径
         input_file = str(input_dir / 'roadnetwork.geojson')
         if not os.path.exists(input_file):
             return jsonify({'status': 'error', 'message': 'Input GeoJSON file not found'}), 400
         
-        # 创建输出目录
         output_folder = output_dir / '002_topology_calculation'
         output_folder.mkdir(parents=True, exist_ok=True)
         
-        # 设置输出文件路径
         output_file = str(output_folder / 'out_network.geojson')
         
-        # 执行计算
         success = calculate_space_syntax(
-            input_file,  # 直接使用输入文件路径
-            output_file, # 直接使用输出文件路径
-            radii="100"
+            input_file,
+            output_file,
+            radii=radii  # 使用前端传入的半径
         )
         
         if success:
-            return jsonify({'status': 'success', 'message': 'Space syntax calculation completed'})
+            return jsonify({
+                'status': 'success', 
+                'message': 'Space syntax calculation completed',
+                'radii': radii  # 返回使用的半径值
+            })
         else:
             return jsonify({'status': 'error', 'message': 'Space syntax calculation failed'})
             
     except Exception as e:
-        print(f"Error in calculate_space_syntax_single: {str(e)}")  # 添加错误日志
+        print(f"Error in calculate_space_syntax_single: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/generate-activity-chain', methods=['POST'])

@@ -48,10 +48,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import * as echarts from 'echarts'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { useTopologyStore } from '@/stores/topology'
+import { storeToRefs } from 'pinia'
 
 const props = defineProps({
     type: {
@@ -65,13 +67,31 @@ const props = defineProps({
     projectId: {
         type: String,
         required: true
+    },
+    radius: {
+        type: [String, Number],
+        default: '100'
     }
 })
 
 const emit = defineEmits(['close', 'geojsonUpdated', 'topology-result'])
 
+const topologyStore = useTopologyStore()
+const { currentRadius } = storeToRefs(topologyStore)
+
 const mcScatterChart = ref(null)
 const histogramChart = ref(null)
+
+// 添加一个 watch 来调试
+watch(() => props.radius, (newRadius) => {
+    console.log('Radius changed:', newRadius)
+})
+
+// 计算 MC 字段名
+const mcField = computed(() => {
+    console.log('TopologyStatisticsPanel: Using radius:', currentRadius.value)
+    return `MC_${currentRadius.value}`
+})
 
 const basicStats = ref({
     diameter: (Math.random() * 10).toFixed(2),
@@ -126,7 +146,7 @@ const updateMCScatterChart = (geojsonData) => {
     if (!mcScatterChart.value) return
     
     const mcValues = geojsonData.features.map(feature => ({
-        value: [feature.properties.CurveId, feature.properties.MC_100]
+        value: [feature.properties.CurveId, feature.properties[mcField.value]]
     }))
 
     const chart = echarts.init(mcScatterChart.value)
@@ -165,8 +185,8 @@ const updateMCScatterChart = (geojsonData) => {
 const updateHistogram = (geojsonData) => {
     if (!histogramChart.value) return
 
-    // 获取所有MC值
-    const mcValues = geojsonData.features.map(feature => feature.properties.MC_100)
+    // 获取所有MC值，使用动态字段名
+    const mcValues = geojsonData.features.map(feature => feature.properties[mcField.value])
     
     // 计算直方图数据
     const binCount = 20  // 直方图柱子数量
@@ -247,8 +267,9 @@ const loadGeojsonData = async () => {
         
         const geojsonData = response.data
         
-        if (!geojsonData.features.some(f => 'MC_100' in f.properties)) {
-            console.error('No MC_100 values found in the data')
+        // 使用注入的 radius 值
+        if (!geojsonData.features.some(f => mcField.value in f.properties)) {
+            console.error(`No ${mcField.value} values found in the data`)
             ElMessage.error('Topology calculation results not available')
             emit('close')
             return

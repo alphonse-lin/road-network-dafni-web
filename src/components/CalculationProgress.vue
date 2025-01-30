@@ -46,9 +46,10 @@
 </template>
 
 <script setup>
-import { ref, defineProps, defineEmits, watch, computed, onBeforeUnmount } from 'vue'
+import { ref, defineProps, defineEmits, watch, computed, onBeforeUnmount, provide } from 'vue'
 import { ElDialog, ElMessage } from 'element-plus'
 import axios from 'axios'
+import { useTopologyStore } from '@/stores/topology'
 
 const props = defineProps({
     visible: {
@@ -99,6 +100,7 @@ const statusMessage = ref('Starting calculation...')
 const error = ref(null)
 const isCalculating = ref(false)
 let dotsInterval = null
+const currentRadii = ref('100')  // 添加一个 ref 来存储当前使用的半径
 
 // 根据mode获取当前的计算步骤
 const calculationSteps = computed(() => CALCULATION_MODES[props.mode])
@@ -129,21 +131,32 @@ onBeforeUnmount(() => {
     }
 })
 
+// 提供这个值
+provide('calculationRadius', currentRadii)
+
+const topologyStore = useTopologyStore()
+
 // 执行计算
 const executeCalculation = async () => {
     try {
         resetState()
         startLoadingAnimation()
 
-        console.log(props.projectId)
         for (const step of calculationSteps.value) {
             statusMessage.value = `Processing ${step.title.toLowerCase()}`
             const response = await axios.post(`http://localhost:5000${step.endpoint}`, {
-                task_id: props.projectId
+                task_id: props.projectId,
+                radii: props.radius?.toString() || '1000'
             })
             
             if (response.data.status === 'error') {
                 throw new Error(response.data.message)
+            }
+            
+            // 保存返回的半径值
+            if (response.data.radii) {
+                topologyStore.setRadius(response.data.radii)
+                console.log('CalculationProgress: Set radius to:', response.data.radii)
             }
             
             steps.value[step.key] = true
@@ -153,9 +166,11 @@ const executeCalculation = async () => {
         statusMessage.value = 'Calculation completed successfully!'
         ElMessage.success('Calculation completed')
         
+        console.log('Emitting calculation-complete with radius:', currentRadii.value)  // 调试日志
+        emit('calculation-complete', currentRadii.value)  // 确保这行代码执行
+        
         setTimeout(() => {
             emit('update:visible', false)
-            emit('calculation-complete')
         }, 2000)
 
     } catch (err) {
