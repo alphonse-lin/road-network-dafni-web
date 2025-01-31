@@ -169,6 +169,7 @@ const handleRiskCalculation = () => {
 
 const handleCalculationComplete = () => {
     ElMessage.success('Calculation completed')
+    emit('vulnerabilityCalculation')
 }
 </script>
 

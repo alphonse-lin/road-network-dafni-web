@@ -53,6 +53,8 @@
     />
     <IndexStatisticsPanel
         v-if="showIndexStatsPanel"
+        :project-id="projectId"
+        :time-interval="vulnerabilityTimeStep"
         :analysis-type="indexAnalysisType"
         @close="closeIndexStatsPanel"
     />

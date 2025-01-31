@@ -286,6 +286,43 @@ def api_calculate_vulnerability():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/api/vulnerability/statistics', methods=['GET'])
+def get_vulnerability_statistics():
+    try:
+        project_id = request.args.get('project_id')
+        if not project_id:
+            return jsonify({'status': 'error', 'message': 'Project ID is required'}), 400
+            
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+        
+        # 读取vulnerability index文件
+        vulnerability_file = output_dir / '004_merged_data' / 'road_vulnerability_index.csv'
+        if not vulnerability_file.exists():
+            return jsonify({'status': 'error', 'message': 'Vulnerability index file not found'}), 404
+            
+        df = pd.read_csv(vulnerability_file)
+        
+        # 计算统计数据
+        total_segments = len(df) // 2  # 因为每个road segment有两条记录
+        
+        # 获取时间间隔
+        time_columns = [col for col in df.columns if col.startswith('risk_level_')]
+        max_time = max([int(col.split('_')[-1]) for col in time_columns])
+        time_period_hours = max_time / 3600  # 转换为小时
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'totalSegments': total_segments,
+                'timePeriodHours': time_period_hours,
+                'vulnerabilityData': df.to_dict(orient='records')
+            }
+        })
+        
+    except Exception as e:
+        print(f"Error in get_vulnerability_statistics: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """检查计算服务状态"""
@@ -486,7 +523,7 @@ def get_network_at_time():
         
         # 使用 geopandas 读取 GeoJSON
         gdf = gpd.read_file(geojson_path)
-        print(gdf.count_geometries())
+        # print(gdf.count_geometries())
         
         # 转换坐标系从 EPSG:27700 到 EPSG:4326
         gdf = gdf.to_crs(CRS.from_epsg(4326))
