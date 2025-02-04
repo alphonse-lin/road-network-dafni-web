@@ -796,6 +796,11 @@
                         });
                     }
                     
+                    // 确保在加载交通网络时设置图例显示
+                    if (this.mapStore) {
+                        this.mapStore.showLegend = true;
+                    }
+                    
                 } catch (error) {
                     console.error('Error loading traffic network:', error);
                     ElMessage.error('Failed to load traffic network');
@@ -921,8 +926,11 @@
                         this.trafficDataSource = null;
                     }
                     
-                    // 隐藏图例
+                    // 清除时同时隐藏所有图例
                     this.showLegend = false;
+                    if (this.mapStore) {
+                        this.mapStore.showLegend = false;
+                    }
                     
                     console.log('All data sources cleared');
                 } catch (error) {
@@ -1082,8 +1090,8 @@
     /* 修改图例容器的样式 */
     .legend-container {
         position: fixed;
-        left: 480px; /* TopologyPanel 的宽度(400px) + 左边距(20px) + 间距(20px) */
-        top: 780px; /* 与 TopologyPanel 对齐 */
+        left: 480px;
+        bottom: 30px; /* 调整位置，避免与交通流量图例重叠 */
         background: rgba(255, 255, 255, 0.95);
         padding: 10px;
         border-radius: 8px;
@@ -1122,9 +1130,9 @@
     }
 
     .traffic-legend {
-        position: absolute;
-        top: 760px;
+        position: fixed;
         left: 480px;
+        bottom: 30px;
         background: white;
         padding: 10px;
         border-radius: 4px;
@@ -1154,7 +1162,7 @@
     .traffic-flow-legend {
         position: fixed;
         left: 480px;
-        top: 780px;
+        bottom: 30px;
         background: rgba(255, 255, 255, 0.95);
         padding: 10px;
         border-radius: 8px;
