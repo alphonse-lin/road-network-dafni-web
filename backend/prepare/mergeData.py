@@ -51,7 +51,7 @@ def process_topology_data(topology_dir: str) -> pd.DataFrame:
         metrics.update(gdf.columns)
     
     # 过滤出MC_相关的指标并排序
-    mc_metrics = sorted([m for m in metrics if m.startswith('MC_')])
+    mc_metrics = sorted([m for m in metrics if m.startswith('MC_100')])
     
     # 处理每个水位的文件
     for file in sorted(Path(topology_dir).glob('out_network_h_*.geojson')):
@@ -73,11 +73,11 @@ def process_topology_data(topology_dir: str) -> pd.DataFrame:
     df = pd.DataFrame(list(all_data.values()))
     
     # 获取所有MC列名并按照水位高度数值排序
-    mc_columns = [col for col in df.columns if col.startswith('MC_')]
+    mc_columns = [col for col in df.columns if col.startswith('MC_100')]
     mc_columns = sorted(mc_columns, key=lambda x: float(x.split('_')[-1]))
     
     # 重新排列列顺序：先是CurveId，然后是排序后的MC列，最后是其他列
-    other_columns = [col for col in df.columns if not col.startswith('MC_') and col != 'CurveId']
+    other_columns = [col for col in df.columns if not col.startswith('MC_100') and col != 'CurveId']
     new_column_order = ['CurveId'] + mc_columns + other_columns
     
     # 按新的列顺序重排DataFrame

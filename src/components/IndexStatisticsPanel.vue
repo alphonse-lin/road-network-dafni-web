@@ -47,13 +47,13 @@
                             <el-select 
                                 v-model="selectedTimeStep" 
                                 placeholder="Select Time Step"
-                                @change="updateVulnerabilityCharts"
+                                @change="handleTimeStepChange"
                                 style="margin-bottom: 20px; width: 100%;"
                             >
                                 <el-option 
                                     v-for="step in timeSteps" 
                                     :key="step"
-                                    :label="`Time: ${step}-${step + props.timeInterval}s`"
+                                    :label="`${mapStore.getTimeRangeLabel(step)}`"
                                     :value="step"
                                 />
                             </el-select>
@@ -84,7 +84,7 @@
                                 <el-option 
                                     v-for="step in timeSteps" 
                                     :key="step"
-                                    :label="`Time: ${step}-${step + props.timeInterval}s`"
+                                    :label="`${step}-${step + props.timeInterval}s`"
                                     :value="step"
                                 />
                             </el-select>
@@ -96,6 +96,16 @@
                         </div>
                     </template>
                 </div>
+            </div>
+
+            <!-- 在图表区域下方添加按钮 -->
+            <div class="action-buttons">
+                <el-button 
+                    :loading="loading" 
+                    @click="showMap" 
+                    class="show-map-btn">
+                    {{ selectedCalculationType === 'vulnerability' ? 'Show Vulnerability Map' : 'Show Risk Map' }}
+                </el-button>
             </div>
         </div>
 
@@ -115,13 +125,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
 import { ElSelect, ElOption, ElDialog } from 'element-plus'
 import vulnerabilityDesc from '@/assets/index_3.jpg'
 import riskDesc from '@/assets/index_4.jpg'
-import axios from 'axios'
+import axios from '@/utils/axios'
 import { ElMessage } from 'element-plus'
+import { useMapStore } from '@/stores/map'
 
 const props = defineProps({
     projectId: {
@@ -134,6 +145,7 @@ const props = defineProps({
     }
 })
 
+const mapStore = useMapStore()
 const selectedCalculationType = ref('vulnerability')
 const showLargeImage = ref(false)
 
@@ -160,6 +172,22 @@ const selectedTimeStep = ref(0)
 const timeSteps = ref([])
 const vulnerabilityData = ref([])
 const selectedRiskTimeStep = ref(0)
+
+// 添加必要的常量和变量定义
+const chartDataCache = ref(new Map())
+const riskLevelMap = {
+    'lowest': 'Lowest Risk',
+    'low_risk': 'Low Risk',
+    'high_risk': 'High Risk',
+    'highest_risk': 'Highest Risk'
+}
+
+const colorMap = {
+    'Lowest Risk': '#008100',     // 绿色
+    'Low Risk': '#BDE101',        // 黄色
+    'High Risk': '#FFBE00',       // 橙色
+    'Highest Risk': '#F80203'     // 红色
+}
 
 // 重置图表大小
 const resizeCharts = () => {
@@ -191,17 +219,34 @@ const initChart = (el, options) => {
 }
 
 // 处理计算类型变化
-const handleCalculationTypeChange = async (newType) => {
-    // 先清理现有图表
-    disposeCharts()
+const handleCalculationTypeChange = async (type) => {
+    console.log('Calculation type changed to:', type);
+    selectedCalculationType.value = type;
+    selectedTimeStep.value = timeSteps.value[0];
     
-    await nextTick()
-    if (newType === 'vulnerability') {
-        await initVulnerabilityCharts()
+    // 添加日志
+    console.log('Current time step:', selectedTimeStep.value);
+    const timeProperty = type === 'vulnerability' 
+        ? `vulnerability_${selectedTimeStep.value}`
+        : `risk_level_${selectedTimeStep.value}`;
+    console.log('Time property being used:', timeProperty);
+    
+    if (type === 'vulnerability') {
+        await updateVulnerabilityCharts(selectedTimeStep.value);
+        await mapStore.setCurrentVulnerabilityTimePoint(timeProperty);
+        if (mapStore.mapInstance?.updateRoadColors) {
+            console.log('Calling updateRoadColors with property:', timeProperty);
+            await mapStore.mapInstance.updateRoadColors(timeProperty);
+        }
     } else {
-        await initRiskCharts()
+        await updateRiskCharts(selectedTimeStep.value);
+        await mapStore.setCurrentVulnerabilityTimePoint(timeProperty);
+        if (mapStore.mapInstance?.updateRoadColors) {
+            console.log('Calling updateRoadColors with property:', timeProperty);
+            await mapStore.mapInstance.updateRoadColors(timeProperty);
+        }
     }
-}
+};
 
 // 初始化脆弱性分析图表
 const initVulnerabilityCharts = async () => {
@@ -209,189 +254,205 @@ const initVulnerabilityCharts = async () => {
     await updateVulnerabilityCharts(selectedTimeStep.value)
 }
 
-// 新增更新脆弱性图表函数
+// 修改更新脆弱性图表函数
 const updateVulnerabilityCharts = async (timeStep) => {
-    // 获取当前时间步长的脆弱性数据，并过滤掉0值
-    const vulColumn = `vulnerability_${timeStep}`
-    const validData = vulnerabilityData.value
-        .filter(row => !isNaN(parseFloat(row[vulColumn])))
-        .map(row => parseFloat(row[vulColumn]))
-        .filter(value => value !== 0)  // 过滤掉0值
+    try {
+        // 使用缓存的数据源
+        if (!vulnerabilityData.value || vulnerabilityData.value.length === 0) {
+            console.warn('No vulnerability data available');
+            return;
+        }
 
-    // 更新散点图 - 散点图保持显示所有数据，包括0值
-    if (scatterChart.value) {
-        const allData = vulnerabilityData.value
-            .filter(row => !isNaN(parseFloat(row[vulColumn])))
-            .map(row => parseFloat(row[vulColumn]))
-        const scatterData = allData.map((value, index) => [index, value])
+        const vulColumn = `vulnerability_${timeStep}`
         
-        charts.value.scatter = initChart(scatterChart.value, {
-            title: { 
-                text: `Vulnerability Distribution`,
-                left: 'center'
-            },
-            tooltip: {
-                trigger: 'item',
-                formatter: function(params) {
-                    return `Index: ${params.data[0]}<br/>Value: ${params.data[1].toFixed(4)}`
-                }
-            },
-            grid: {
-                top: 60,
-                left: 50,
-                right: 30,
-                bottom: 40
-            },
-            xAxis: { 
-                type: 'value',
-                name: 'Road Segment Index'
-            },
-            yAxis: { 
-                type: 'value',
-                name: 'Vulnerability Value'
-            },
-            series: [{
-                type: 'scatter',
-                data: scatterData,
-                symbolSize: 8
-            }]
-        })
-    }
+        // 使用 Map 缓存计算结果
+        if (!chartDataCache.value) {
+            chartDataCache.value = new Map();
+        }
 
-    // 更新直方图
-    if (histogramChart.value) {
-        const binCount = 20
-        const min = Math.min(...validData)
-        const max = Math.max(...validData)
-        const binWidth = (max - min) / binCount
+        let validData, scatterData;
+        const cacheKey = `${vulColumn}_data`;
+        
+        // 检查缓存中是否已有数据
+        if (chartDataCache.value.has(cacheKey)) {
+            const cachedData = chartDataCache.value.get(cacheKey);
+            validData = cachedData.validData;
+            scatterData = cachedData.scatterData;
+        } else {
+            // 只在首次计算时进行数据处理
+            validData = vulnerabilityData.value
+                .filter(row => !isNaN(parseFloat(row[vulColumn])))
+                .map(row => parseFloat(row[vulColumn]))
+                .filter(value => value !== 0);
 
-        const bins = Array(binCount).fill(0)
-        validData.forEach(value => {
-            const binIndex = Math.min(
-                Math.floor((value - min) / binWidth),
-                binCount - 1
-            )
-            bins[binIndex]++
-        })
+            scatterData = vulnerabilityData.value
+                .filter(row => !isNaN(parseFloat(row[vulColumn])))
+                .map((row, index) => [index, parseFloat(row[vulColumn])]);
 
-        // 简化标签显示
-        const binLabels = Array(binCount).fill(0).map((_, i) => {
-            const start = min + i * binWidth
-            const end = min + (i + 1) * binWidth
-            // 使用toFixed(2)限制小数位数
-            // return `${start.toExponential(2)}-${end.toExponential(2)}`
-            // 或者使用普通数字格式：
-            return `${start.toFixed(2)}-${end.toFixed(2)}`
-        })
+            // 存入缓存
+            chartDataCache.value.set(cacheKey, { validData, scatterData });
+        }
 
-        charts.value.histogram = initChart(histogramChart.value, {
-            title: { 
-                text: `Vulnerability Histogram`,
-                left: 'center'
-            },
-            tooltip: {
-                trigger: 'item',
-                formatter: function(params) {
-                    const range = params.name.split('-')
-                    // 在tooltip中可以显示更精确的值
-                    return `Range: ${range[0]} - ${range[1]}<br/>Count: ${params.value}`
-                }
-            },
-            grid: {
-                top: 60,
-                left: 50,
-                right: 30,
-                bottom: 80
-            },
-            xAxis: { 
-                type: 'category',
-                data: binLabels,
-                axisLabel: {
-                    rotate: 45,
-                    interval: 1,
-                    fontSize: 10  // 减小字体大小
+        // 更新散点图
+        if (scatterChart.value) {
+            charts.value.scatter = initChart(scatterChart.value, {
+                title: { 
+                    text: `Vulnerability Distribution`,
+                    left: 'center'
                 },
-                name: 'Vulnerability Range'
-            },
-            yAxis: { 
-                type: 'value',
-                name: 'Count'
-            },
-            series: [{
-                type: 'bar',
-                data: bins,
-                itemStyle: {
-                    color: '#5470c6'
-                }
-            }]
-        })
-    }
-}
+                tooltip: {
+                    trigger: 'item',
+                    formatter: function(params) {
+                        return `Index: ${params.data[0]}<br/>Value: ${params.data[1].toFixed(4)}`
+                    }
+                },
+                grid: {
+                    top: 60,
+                    left: 50,
+                    right: 30,
+                    bottom: 40
+                },
+                xAxis: { 
+                    type: 'value',
+                    name: 'Road Segment Index'
+                },
+                yAxis: { 
+                    type: 'value',
+                    name: 'Vulnerability Value'
+                },
+                series: [{
+                    type: 'scatter',
+                    data: scatterData,
+                    symbolSize: 8
+                }]
+            });
+        }
 
-// 生成时间数据
-// const generateTimeLabels = () => {
-//     const startTime = 7.5 * 60; // 7:30 in minutes
-//     const endTime = 9 * 60;     // 9:00 in minutes
-//     const interval = (endTime - startTime) / 100; // 分成100份
-    
-//     return Array.from({ length: 100 }, (_, i) => {
-//         const minutes = startTime + (i * interval);
-//         const hours = Math.floor(minutes / 60);
-//         const mins = Math.floor(minutes % 60);
-//         return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
-//     });
-// }
+        // 更新直方图
+        if (histogramChart.value) {
+            const binCount = 20;
+            const min = Math.min(...validData);
+            const max = Math.max(...validData);
+            const binWidth = (max - min) / binCount;
+
+            // 使用缓存的分箱数据
+            const binCacheKey = `${vulColumn}_bins`;
+            let bins, binLabels;
+
+            if (chartDataCache.value.has(binCacheKey)) {
+                const cachedBins = chartDataCache.value.get(binCacheKey);
+                bins = cachedBins.bins;
+                binLabels = cachedBins.binLabels;
+            } else {
+                bins = Array(binCount).fill(0);
+                validData.forEach(value => {
+                    const binIndex = Math.min(
+                        Math.floor((value - min) / binWidth),
+                        binCount - 1
+                    );
+                    bins[binIndex]++;
+                });
+
+                binLabels = Array(binCount).fill(0).map((_, i) => {
+                    const start = min + i * binWidth;
+                    const end = min + (i + 1) * binWidth;
+                    return `${start.toFixed(2)}-${end.toFixed(2)}`;
+                });
+
+                // 存入缓存
+                chartDataCache.value.set(binCacheKey, { bins, binLabels });
+            }
+
+            charts.value.histogram = initChart(histogramChart.value, {
+                title: { 
+                    text: `Vulnerability Histogram`,
+                    left: 'center'
+                },
+                tooltip: {
+                    trigger: 'item',
+                    formatter: function(params) {
+                        const range = params.name.split('-')
+                        // 在tooltip中可以显示更精确的值
+                        return `Range: ${range[0]} - ${range[1]}<br/>Count: ${params.value}`
+                    }
+                },
+                grid: {
+                    top: 60,
+                    left: 50,
+                    right: 30,
+                    bottom: 80
+                },
+                xAxis: { 
+                    type: 'category',
+                    data: binLabels,
+                    axisLabel: {
+                        rotate: 45,
+                        interval: 1,
+                        fontSize: 10  // 减小字体大小
+                    },
+                    name: 'Vulnerability Range'
+                },
+                yAxis: { 
+                    type: 'value',
+                    name: 'Count'
+                },
+                series: [{
+                    type: 'bar',
+                    data: bins,
+                    itemStyle: {
+                        color: '#5470c6'
+                    }
+                }]
+            });
+        }
+
+        // 更新地图颜色（如果需要）
+        if (mapStore.showVulnerabilityLegend) {
+            const timeProperty = `vulnerability_${timeStep}`;
+            await mapStore.setCurrentVulnerabilityTimePoint(timeProperty);
+            if (mapStore.mapInstance?.updateRoadColors) {
+                await mapStore.mapInstance.updateRoadColors(timeProperty);
+            }
+        }
+    } catch (error) {
+        console.error('Error updating charts:', error);
+    }
+};
 
 // 更新风险图表
 const updateRiskCharts = async (timeStep) => {
-    // 先清理现有图表
-    if (charts.value.pie) {
-        charts.value.pie.dispose()
-    }
-    if (charts.value.trend) {
-        charts.value.trend.dispose()
-    }
-    
-    const riskColumn = `risk_level_${timeStep}`
-    
-    // 只保留需要的风险等级
-    const riskLevelMap = {
-        'lowest': 'Lowest Risk',
-        'low_risk': 'Low Risk',
-        'high_risk': 'High Risk',
-        'highest_risk': 'Highest Risk'
-    }
-    
-    // 确保数据已加载
     if (!vulnerabilityData.value || vulnerabilityData.value.length === 0) {
-        console.warn('No vulnerability data available')
-        return
+        console.warn('No vulnerability data available');
+        return;
     }
 
-    // 统计风险等级数量（排除 flooded 和 unknown）
-    const riskCounts = {}
-    vulnerabilityData.value.forEach(row => {
-        const riskLevel = row[riskColumn]
-        if (riskLevel && riskLevelMap[riskLevel]) {
-            riskCounts[riskLevel] = (riskCounts[riskLevel] || 0) + 1
-        }
-    })
+    const riskColumn = `risk_level_${timeStep}`;
+    const cacheKey = `${riskColumn}_data`;
 
-    // 转换为饼图数据格式
-    const pieData = Object.entries(riskCounts).map(([level, count]) => ({
-        name: riskLevelMap[level],
-        value: count
-    }))
+    // 使用缓存的风险数据
+    let pieData;
+    if (chartDataCache.value.has(cacheKey)) {
+        pieData = chartDataCache.value.get(cacheKey);
+    } else {
+        // 计算风险等级数量
+        const riskCounts = {};
+        vulnerabilityData.value.forEach(row => {
+            const riskLevel = row[riskColumn];
+            if (riskLevel && riskLevelMap[riskLevel]) {
+                riskCounts[riskLevel] = (riskCounts[riskLevel] || 0) + 1;
+            }
+        });
 
-    // 设置饼图颜色
-    const colorMap = {
-        'Lowest Risk': '#008100',  // 深绿色
-        'Low Risk': '#BDE101',     // 浅绿色
-        'High Risk': '#FFBE00',    // 橙色
-        'Highest Risk': '#F80203'  // 红色
+        pieData = Object.entries(riskCounts).map(([level, count]) => ({
+            name: riskLevelMap[level],
+            value: count
+        }));
+
+        // 存入缓存
+        chartDataCache.value.set(cacheKey, pieData);
     }
 
-    // 初始化饼图
+    // 更新饼图
     if (pieChart.value) {
         const pieOption = {
             title: {
@@ -437,7 +498,7 @@ const updateRiskCharts = async (timeStep) => {
         charts.value.pie = initChart(pieChart.value, pieOption)
     }
 
-    // 更新趋势图
+    // 更新趋势图（可以考虑也加入缓存）
     if (trendChart.value) {
         // 计算每个时间点的分布
         const trendData = {}
@@ -517,7 +578,13 @@ const updateRiskCharts = async (timeStep) => {
             }))
         })
     }
-}
+
+    // 更新地图
+    if (mapStore.showVulnerabilityLegend) {
+        const timePoint = `risk_level_${timeStep}`;
+        await mapStore.setCurrentVulnerabilityTimePoint(timePoint);
+    }
+};
 
 // 初始化风险图表
 const initRiskCharts = async () => {
@@ -590,7 +657,122 @@ watch(selectedCalculationType, async (newValue) => {
     }
 })
 
-defineEmits(['close'])
+// 在组件卸载时隐藏图例
+onBeforeUnmount(() => {
+    mapStore.setShowVulnerabilityLegend(false);
+    clearChartCache();
+})
+
+// 时间步长变化处理
+const handleTimeStepChange = async (newTimeStep) => {
+    try {
+        // 更新图表
+        if (selectedCalculationType.value === 'vulnerability') {
+            await updateVulnerabilityCharts(newTimeStep);
+            // 更新地图 - 使用 vulnerability 属性
+            const timeProperty = `vulnerability_${newTimeStep}`;
+            await mapStore.setCurrentVulnerabilityTimePoint(timeProperty);
+            if (mapStore.mapInstance?.updateRoadColors) {
+                await mapStore.mapInstance.updateRoadColors(timeProperty);
+            }
+        } else {
+            await updateRiskCharts(newTimeStep);
+            // 更新地图 - 使用 risk_level 属性
+            const timeProperty = `risk_level_${newTimeStep}`;
+            await mapStore.setCurrentVulnerabilityTimePoint(timeProperty);
+            if (mapStore.mapInstance?.updateRoadColors) {
+                await mapStore.mapInstance.updateRoadColors(timeProperty);
+            }
+        }
+    } catch (error) {
+        console.error('Error updating time step:', error);
+    }
+};
+
+// 显示脆弱性地图
+const showVulnerabilityMap = async () => {
+    try {
+        loading.value = true;
+        
+        // 获取脆弱性网络数据
+        const response = await axios.get(`/api/vulnerability/network`, {
+            params: {
+                project_id: props.projectId
+            }
+        });
+
+        console.log('Vulnerability network data received:', response.data);
+        
+        if (response.data) {
+            if (mapStore.mapInstance?.loadVulnerabilityNetwork) {
+                const success = await mapStore.mapInstance.loadVulnerabilityNetwork(response.data);
+                if (success) {
+                    const timeProperty = `vulnerability_${selectedTimeStep.value}`;
+                    await mapStore.mapInstance.updateRoadColors(timeProperty);
+                }
+            }
+        }
+        
+        loading.value = false;
+    } catch (error) {
+        console.error('Error showing vulnerability map:', error);
+        loading.value = false;
+        ElMessage.error('Failed to load vulnerability map');
+    }
+};
+
+// 显示风险地图
+const showRiskMap = async () => {
+    try {
+        loading.value = true;
+        
+        // 获取风险网络数据
+        const response = await axios.get(`/api/vulnerability/network`, {
+            params: {
+                project_id: props.projectId
+            }
+        });
+
+        console.log('Risk network data received:', response.data);
+        
+        if (response.data) {
+            if (mapStore.mapInstance?.loadRiskNetwork) {
+                const success = await mapStore.mapInstance.loadRiskNetwork(response.data);
+                if (success) {
+                    const timeProperty = `risk_level_${selectedTimeStep.value}`;
+                    await mapStore.mapInstance.updateRoadColors(timeProperty);
+                }
+            }
+        }
+        
+        loading.value = false;
+    } catch (error) {
+        console.error('Error showing risk map:', error);
+        loading.value = false;
+        ElMessage.error('Failed to load risk map');
+    }
+};
+
+// 根据当前计算类型选择显示哪种地图
+const showMap = async () => {
+    if (selectedCalculationType.value === 'vulnerability') {
+        await showVulnerabilityMap();
+    } else {
+        await showRiskMap();
+    }
+};
+
+const loading = ref(false)
+
+// 添加缓存清理函数
+const clearChartCache = () => {
+    chartDataCache.value = new Map();
+};
+
+// 确保函数被导出
+defineExpose({
+    showMap
+});
 </script>
 
 <style scoped>
@@ -707,5 +889,15 @@ h4 {
     text-align: center;
     color: #666;
     margin-top: 5px;
+}
+
+.action-buttons {
+    margin-top: 20px;
+    text-align: center;
+}
+
+.show-map-btn {
+    margin-bottom: 15px;
+    width: 100%;
 }
 </style> 

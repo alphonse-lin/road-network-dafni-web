@@ -33,6 +33,8 @@ DATA_DIR = BASE_DIR / 'data'  # 所有计算任务的根目录
 def ensure_task_directories(project_id):
     # 获取项目根目录
     base_dir = Path(__file__).parent.parent
+
+    debug_project_id = '634ee78f-a878-4693-ae09-fa575965f54f'
     
     # 构建目录路径
     task_dir = base_dir / 'data' / project_id
@@ -276,14 +278,56 @@ def api_calculate_vulnerability():
         time_interval = data.get('time_interval', 450)
         output_filename = data.get('output_filename', 'road_vulnerability_index.csv')
         
+        # 计算脆弱性指数
         success = calculate_vulnerability(
             input_file=input_file,
             output_dir=str(output_dir / '004_merged_data'),
             time_interval=time_interval,
             output_filename=output_filename
         )
-        return jsonify({'status': 'success' if success else 'error'})
+        
+        if not success:
+            return jsonify({'status': 'error', 'message': 'Failed to calculate vulnerability'}), 500
+
+        # 读取脆弱性指数CSV文件
+        vulnerability_file = output_dir / '004_merged_data' / output_filename
+        vulnerability_df = pd.read_csv(vulnerability_file)
+        
+        # 对于每个CurveID只保留第一条记录
+        vulnerability_df = vulnerability_df.drop_duplicates(subset=['CurveId'], keep='first')
+        
+        # 读取topology GeoJSON文件
+        topology_file = output_dir / '002_topology_calculation' / 'out_network.geojson'
+        gdf = gpd.read_file(topology_file)
+        
+        # 确保CurveID列类型一致
+        gdf['CurveId'] = gdf['CurveId'].astype(str)
+        vulnerability_df['CurveId'] = vulnerability_df['CurveId'].astype(str)
+        
+        # 合并GeoJSON和脆弱性数据
+        merged_gdf = gdf.merge(vulnerability_df, on='CurveId', how='left')
+        
+        # 转换坐标系到EPSG:4326
+        if merged_gdf.crs != 'EPSG:4326':
+            merged_gdf = merged_gdf.to_crs('EPSG:4326')
+        
+        # 保存合并后的GeoJSON文件
+        output_geojson = output_dir / '004_merged_data' / 'vulnerability_network.geojson'
+        merged_gdf.to_file(output_geojson, driver='GeoJSON')
+        
+        # 转换为GeoJSON格式并返回
+        # geojson_data = json.loads(merged_gdf.to_json())
+        
+        return jsonify({
+            'status': 'success',
+            # 'data': geojson_data,
+            'message': 'Vulnerability calculation and data merge completed successfully'
+        })
+        
     except Exception as e:
+        print(f"Error in calculate_vulnerability: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/api/vulnerability/statistics', methods=['GET'])
@@ -723,6 +767,41 @@ def get_road_traffic_data():
         print(f"Error in get_road_traffic_data: {str(e)}")
         import traceback
         print(traceback.format_exc())
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/vulnerability/network', methods=['GET'])
+def get_vulnerability_network():
+    print("=== Starting get_vulnerability_network ===")
+    try:
+        project_id = request.args.get('project_id')
+        print("Project ID from request:", project_id, file=sys.stderr)
+        
+        if not project_id:
+            print("No project ID provided", file=sys.stderr)
+            return jsonify({'status': 'error', 'message': 'Project ID is required'}), 400
+            
+        task_dir, input_dir, output_dir = ensure_task_directories(project_id)
+        geojson_path = output_dir / '004_merged_data' / 'vulnerability_network.geojson'
+        
+        print(f"File path: {geojson_path}", file=sys.stderr)
+        print(f"File exists: {geojson_path.exists()}", file=sys.stderr)
+        
+        if not geojson_path.exists():
+            print("File not found!", file=sys.stderr)
+            return jsonify({
+                'status': 'error', 
+                'message': f'Vulnerability network data not found at {geojson_path}'
+            }), 404
+            
+        with open(geojson_path, 'r') as f:
+            geojson_data = json.load(f)
+            
+        return jsonify(geojson_data)
+        
+    except Exception as e:
+        print(f"Error in get_vulnerability_network: {str(e)}", file=sys.stderr)
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr)
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':

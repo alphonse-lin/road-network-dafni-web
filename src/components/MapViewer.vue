@@ -57,6 +57,7 @@
         :time-interval="vulnerabilityTimeStep"
         :analysis-type="indexAnalysisType"
         @close="closeIndexStatsPanel"
+        @showVulnerabilityMap="handleShowVulnerabilityMap"
     />
     <CalculationProgress
         v-if="showCalculationProgress"
@@ -82,6 +83,24 @@
             <span>120</span>
         </div>
     </div>
+    <!-- <div v-if="mapStore.showVulnerabilityLegend" class="vulnerability-legend">
+        <h4>Vulnerability Index</h4>
+        <div class="vulnerability-gradient"></div>
+        <div class="vulnerability-labels">
+            <span>Low</span>
+            <span>Medium</span>
+            <span>High</span>
+        </div>
+    </div> -->
+    <!-- <div v-if="mapStore.showRiskLegend" class="risk-legend">
+        <h4>Risk Level</h4>
+        <div class="risk-colors">
+            <div v-for="(color, level) in riskColors" :key="level" class="risk-color-item">
+                <div class="color-box" :style="{ backgroundColor: color }"></div>
+                <span>{{ level }}</span>
+            </div>
+        </div>
+    </div> -->
     </template>
     
     <script>
@@ -100,16 +119,15 @@
     import CalculationProgress from './CalculationProgress.vue'
     import { ElMessage } from 'element-plus'
     import proj4 from 'proj4'
-    import { ref, inject, nextTick } from 'vue'
+    import { ref, inject, nextTick, defineComponent, defineAsyncComponent} from 'vue'
     import { useTopologyStore } from '@/stores/topology'
     import axios from '@/utils/axios'
-    import { defineAsyncComponent } from 'vue'
     import { useMapStore } from '@/stores/map'
     
     // 定义英国国家网格坐标系统 (EPSG:27700)
     proj4.defs("EPSG:27700", "+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs");
     
-    export default {
+    export default defineComponent({
         name: 'MapViewer',
         components: {
             TopNavigation,
@@ -121,7 +139,7 @@
             TransportationStatisticsPanel,
             IndexPanel,
             IndexStatisticsPanel,
-            CalculationProgress
+            CalculationProgress,
         },
         data() {
             return {
@@ -152,6 +170,19 @@
                 },
                 trafficDataSource: null, // 新增：专门用于显示交通流量的数据源
                 trafficDataCache: null, // 新增：用于缓存交通数据
+                showPolarMap: false,
+                vulnerabilityData: null,
+                vulnerabilityDataSource: null,
+                currentVulnerabilityTimePoint: null,
+                vulnerabilityTimePoints: [],
+                vulnerabilityDataCache: null,
+                vulnerabilityLegend: null,
+                riskColors: {
+                    'Lowest Risk': '#008100',
+                    'Low Risk': '#BDE101',
+                    'High Risk': '#FFBE00',
+                    'Highest Risk': '#F80203'
+                },
             }
         },
         setup() {
@@ -279,8 +310,16 @@
                 loadTrafficNetwork: this.loadTrafficNetwork.bind(this),
                 updateTrafficVisualization: this.updateTrafficVisualization.bind(this),
                 clearTrafficVisualization: this.clearTrafficVisualization.bind(this),
-                clearAllDataSources: this.clearAllDataSources.bind(this)
+                clearAllDataSources: this.clearAllDataSources.bind(this),
+                updateVulnerabilityVisualization: this.updateVulnerabilityVisualization.bind(this),
+                loadVulnerabilityNetwork: this.loadVulnerabilityNetwork.bind(this),
+                updateRoadColors: this.updateRoadColors.bind(this),
             });
+            
+            console.log('Map instance methods registered:', 
+                !!this.mapStore.mapInstance?.loadVulnerabilityNetwork,
+                !!this.mapStore.mapInstance?.updateRoadColors
+            );
         },
         beforeUnmount() {
             if (this.viewer) {
@@ -448,7 +487,7 @@
                                 const maxMC = Math.max(...mcValues);
                                 
                                 // 显示图例
-                                this.showLegend = true;
+                                this.showLegend = false;
                                 this.minMC = minMC;
                                 this.maxMC = maxMC;
 
@@ -546,6 +585,38 @@
                     ElMessage.error('An error occurred while updating the map');
                 }
             },
+            async handleGeojsonUpdate_index_calculation(geojsonData) {
+                try {
+                    // 清除现有数据
+                    await this.clearAllDataSources();
+                    
+                    // 创建新的数据源
+                    const dataSource = new Cesium.GeoJsonDataSource('indexNetwork');
+                    
+                    // 在加载之前，为每个 feature 保存原始的 27700 坐标
+                    geojsonData.features.forEach(feature => {
+                        feature.properties = feature.properties || {};
+                        // 保存原始的 27700 坐标到 properties
+                        feature.properties.originalCoordinates = feature.geometry.coordinates;
+                    });
+
+                    // 加载转换后的 GeoJSON（4326坐标系）
+                    await dataSource.load(geojsonData, {
+                        stroke: new Cesium.Color(0.8, 0.8, 0.8, 1.0),
+                        strokeWidth: 2,
+                        clampToGround: true
+                    });
+
+                    this.currentGeoJsonDataSource = dataSource;
+                    await this.viewer.dataSources.add(dataSource);
+                    
+                    console.log('GeoJSON data loaded successfully');
+                } catch (error) {
+                    console.error('Error loading GeoJSON:', error);
+                    ElMessage.error('Failed to load network');
+                }
+            },
+            
             handleProjectIdGenerated(id) {
                 this.projectId = id;
                 console.log('Project ID set in MapViewer:', id);
@@ -835,7 +906,7 @@
 
                             // 计算颜色和宽度
                             const color = this.mapStore.getTrafficColor(trafficValue);
-                            const width = this.mapStore.getTrafficWidth(trafficValue);
+                            // const width = this.mapStore.getTrafficWidth(trafficValue);
 
                             // 创建新的颜色实例
                             let cesiumColor;
@@ -853,7 +924,7 @@
                             if (cesiumColor) {
                                 // 更新实体的颜色和宽度
                                 entity.polyline.material = new Cesium.ColorMaterialProperty(cesiumColor);
-                                entity.polyline.width = new Cesium.ConstantProperty(width);
+                                // entity.polyline.width = new Cesium.ConstantProperty(width);
                                 updatedCount++;
                             }
                         }
@@ -993,6 +1064,205 @@
                     console.error('Error initializing traffic data cache:', error);
                 }
             },
+
+            // 添加关闭极坐标图的方法
+            closePolarMap() {
+                this.showPolarMap = false
+                this.vulnerabilityData = null
+            },
+
+            // 添加预处理缓存的方法
+            async prepareVulnerabilityCache(geojsonData) {
+                console.log('Preparing vulnerability cache...');
+                this.vulnerabilityCache = new Map();
+
+                // 获取所有时间点
+                const timePoints = Object.keys(geojsonData.features[0].properties)
+                    .filter(key => key.startsWith('vulnerability_'))
+                    .map(key => parseInt(key.split('_')[1]))
+                    .sort((a, b) => a - b);
+
+                // 为每个时间点预处理数据
+                timePoints.forEach(timePoint => {
+                    const timeCache = new Map();
+                    
+                    geojsonData.features.forEach((feature, index) => {
+                        const vulnerabilityKey = `vulnerability_${timePoint}`;
+                        const vulnerabilityValue = feature.properties[vulnerabilityKey];
+                        
+                        if (vulnerabilityValue !== undefined) {
+                            const color = this.mapStore.getVulnerabilityColor(vulnerabilityValue);
+                            const cesiumColor = Cesium.Color.fromCssColorString(color);
+                            
+                            timeCache.set(index, {
+                                color: cesiumColor,
+                                value: vulnerabilityValue
+                            });
+                        }
+                    });
+                    
+                    this.vulnerabilityCache.set(timePoint, timeCache);
+                });
+                
+                console.log('Vulnerability cache prepared');
+                return timePoints;
+            },
+
+            // 修改加载网络的方法
+            async loadVulnerabilityNetwork(geojsonData) {
+                console.log('Loading vulnerability network with data:', geojsonData);
+                
+                // 清除旧数据
+                if (this.vulnerabilityDataSource) {
+                    this.viewer.dataSources.remove(this.vulnerabilityDataSource);
+                }
+                
+                try {
+                    // 创建新数据源
+                    this.vulnerabilityDataSource = new Cesium.GeoJsonDataSource();
+                    
+                    // 加载完整的GeoJSON数据
+                    await this.vulnerabilityDataSource.load(geojsonData, {
+                        stroke: Cesium.Color.RED,
+                        strokeWidth: 2
+                    });
+                    
+                    // 添加到viewer
+                    await this.viewer.dataSources.add(this.vulnerabilityDataSource);
+                    
+                    // 初始化时使用当前选中的时间点
+                    const currentTimeProperty = `vulnerability_${this.mapStore.currentVulnerabilityTimePoint || 0}`;
+                    await this.updateRoadColors(currentTimeProperty);
+                    
+                    // 缩放到数据范围
+                    this.viewer.zoomTo(this.vulnerabilityDataSource);
+                    
+                    return true;
+                } catch (error) {
+                    console.error('Error loading vulnerability network:', error);
+                    return false;
+                }
+            },
+            
+
+            // 修改更新可视化的方法
+            async updateVulnerabilityVisualization() {
+                console.log('Updating vulnerability visualization');
+                if (!this.vulnerabilityDataSource) {
+                    console.error('No vulnerability data source');
+                    return;
+                }
+
+                const timePoint = this.mapStore.currentVulnerabilityTimePoint;
+                console.log('Current time point:', timePoint);
+
+                const entities = this.vulnerabilityDataSource.entities.values;
+                entities.forEach(entity => {
+                    if (entity.polyline) {
+                        const value = entity.properties[timePoint];
+                        if (value !== undefined) {
+                            const color = this.mapStore.getVulnerabilityColor(value);
+                            entity.polyline.material = Cesium.Color.fromCssColorString(color);
+                            entity.polyline.width = 3 + (value / 1000);
+                        }
+                    }
+                });
+
+                // 强制重新渲染
+                this.viewer.scene.requestRender();
+            },
+
+            showVulnerabilityLegend() {
+                if (this.vulnerabilityLegend) {
+                    this.vulnerabilityLegend.style.display = 'block';
+                    return;
+                }
+
+                // 创建 legend 元素
+                this.vulnerabilityLegend = document.createElement('div');
+                this.vulnerabilityLegend.className = 'vulnerability-legend';
+                this.vulnerabilityLegend.innerHTML = `
+                    <div class="legend-title">Vulnerability</div>
+                    <div class="legend-gradient"></div>
+                    <div class="legend-labels">
+                        <span>Low</span>
+                        <span>High</span>
+                    </div>
+                `;
+
+                // 添加到地图容器
+                this.$el.appendChild(this.vulnerabilityLegend);
+            },
+
+            hideVulnerabilityLegend() {
+                if (this.vulnerabilityLegend) {
+                    this.vulnerabilityLegend.style.display = 'none';
+                }
+            },
+
+            async updateRoadColors(timeProperty) {
+                console.log('开始更新道路颜色，当前属性:', timeProperty);
+                
+                if (!this.vulnerabilityDataSource) {
+                    console.error('数据源不存在');
+                    return;
+                }
+
+                const entities = this.vulnerabilityDataSource.entities.values;
+                console.log('Total entities to update:', entities.length);
+                
+                // 检查第一个实体的所有属性名称
+                // if (entities.length > 0) {
+                //     const firstEntity = entities[0];
+                //     console.log('First entity properties:', Object.keys(firstEntity.properties));
+                //     console.log('Property value for', timeProperty, ':', firstEntity.properties[timeProperty]?.getValue());
+                // }
+
+                let updatedCount = 0;
+                entities.forEach((entity) => {
+                    if (entity && entity.polyline) {
+                        if (timeProperty.startsWith('risk_level_')) {
+                            const riskLevel = entity.properties[timeProperty]?.getValue();
+                            // console.log(`Entity ${index} risk level:`, riskLevel);
+                            if (riskLevel) {
+                                const color = this.mapStore.getRiskLevelColor(riskLevel);
+                                // console.log(`Color for risk level ${riskLevel}:`, color);
+                                entity.polyline.material = new Cesium.ColorMaterialProperty(
+                                    Cesium.Color.fromCssColorString(color)
+                                );
+                                updatedCount++;
+                            }
+                        } else if (timeProperty.startsWith('vulnerability_')) {
+                            const value = entity.properties[timeProperty]?.getValue();
+                            // console.log(`Entity ${index} vulnerability value:`, value);
+                            if (value !== undefined && value !== null) {
+                                const color = this.mapStore.getVulnerabilityColor(parseFloat(value));
+                                entity.polyline.material = new Cesium.ColorMaterialProperty(
+                                    Cesium.Color.fromCssColorString(color)
+                                );
+                                updatedCount++;
+                            }
+                        }
+                    }
+                });
+                
+                console.log(`Successfully updated ${updatedCount} entities`);
+                this.viewer.scene.requestRender();
+            },
+
+            // addLegend() {
+            //     const legend = document.createElement('div');
+            //     legend.className = 'vulnerability-legend';
+            //     legend.innerHTML = `
+            //         <div class="legend-title">Vulnerability</div>
+            //         <div class="legend-gradient"></div>
+            //         <div class="legend-labels">
+            //             <span>Low</span>
+            //             <span>High</span>
+            //         </div>
+            //     `;
+            //     this.viewer.container.appendChild(this.vulnerabilityLegend);
+            // }
         },
         computed: {
             showTopologyPanel() {
@@ -1045,18 +1315,59 @@
                 immediate: true,
                 async handler(newPanel, oldPanel) {
                     if (newPanel !== oldPanel) {
-                        // 当面板切换时，清除所有数据
-                        // await this.clearAllDataSources();
-                        
-                        // 如果切换到交通模拟面板，初始化交通数据
-                        if (newPanel === 'transportation' && this.projectId) {
-                            // 可以在这里添加初始化交通模拟的逻辑
+                        // 如果切换到指标分析面板，检查并加载路网
+                        if (newPanel === 'index' && this.projectId) {
+                            try {
+                                const response = await axios.get('/api/topology/network', {
+                                    params: {
+                                        project_id: this.projectId
+                                    }
+                                });
+                                if (response.data) {
+                                    // 在这里转换坐标系统，并添加 crs 属性
+                                    const convertedGeojson = {
+                                        type: "FeatureCollection",
+                                        crs: {
+                                            type: "name",
+                                            properties: {
+                                                name: "EPSG:4326"
+                                            }
+                                        },
+                                        features: response.data.features.map(feature => ({
+                                            ...feature,
+                                            geometry: {
+                                                ...feature.geometry,
+                                                coordinates: feature.geometry.type === 'LineString' 
+                                                    ? feature.geometry.coordinates.map(coord => {
+                                                        const [x, y] = proj4('EPSG:27700', 'EPSG:4326', coord);
+                                                        return [x, y];
+                                                    })
+                                                    : feature.geometry.type === 'MultiLineString'
+                                                        ? feature.geometry.coordinates.map(line => 
+                                                            line.map(coord => {
+                                                                const [x, y] = proj4('EPSG:27700', 'EPSG:4326', coord);
+                                                                return [x, y];
+                                                            })
+                                                        )
+                                                        : feature.geometry.coordinates
+                                            }
+                                        }))
+                                    };
+                                    await this.handleGeojsonUpdate_index_calculation(convertedGeojson);
+                                    console.log("成功加载初始路网");
+                                } else {
+                                    console.warn("未能获取路网数据");
+                                }
+                            } catch (error) {
+                                console.error("加载初始路网失败:", error);
+                                ElMessage.error('Failed to load initial network');
+                            }
                         }
                     }
                 }
             }
         }
-    }
+    })
     </script>
     
     <style>
@@ -1192,5 +1503,77 @@
         font-size: 12px;
         color: #666;
         margin-top: 4px;
+    }
+
+    .polar-map-container {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 80%;
+        height: 80%;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+        z-index: 1000;
+        padding: 20px;
+    }
+
+    .vulnerability-legend {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        background: rgba(255, 255, 255, 0.95);
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        z-index: 1000;
+    }
+
+    .vulnerability-gradient {
+        width: 200px;
+        height: 20px;
+        margin: 8px 0;
+        background: linear-gradient(to right,
+            #00ff00, /* 绿色 - 低脆弱性 */
+            #ffff00, /* 黄色 - 中等脆弱性 */
+            #ff0000  /* 红色 - 高脆弱性 */
+        );
+        border-radius: 4px;
+    }
+
+    .vulnerability-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        color: #666;
+    }
+
+    .risk-legend {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        background: rgba(255, 255, 255, 0.95);
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        z-index: 1000;
+    }
+
+    .risk-colors {
+        margin-top: 8px;
+    }
+
+    .risk-color-item {
+        display: flex;
+        align-items: center;
+        margin: 4px 0;
+    }
+
+    .color-box {
+        width: 20px;
+        height: 20px;
+        margin-right: 8px;
+        border-radius: 4px;
     }
     </style>

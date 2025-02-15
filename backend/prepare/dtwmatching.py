@@ -34,10 +34,10 @@ def dtw_matching(input_csv_path, output_csv_path=None, n_jobs=-1):
         output_csv_path = f"{file_base}_dtw_matching.csv"
 
     # 获取所有MC前缀（1000, 2000, 3000, -1）
-    mc_prefixes = sorted(list(set([col.split('_')[1] for col in data.columns if col.startswith('MC_')])))
+    mc_prefixes = sorted(list(set([col.split('_')[1] for col in data.columns if col.startswith('MC_100')])))
     
     # 获取所有时间点
-    time_points = sorted(list(set([int(col.split('_')[2]) for col in data.columns if col.startswith('MC_')])))
+    time_points = sorted(list(set([int(col.split('_')[2]) for col in data.columns if col.startswith('MC_100')])))
     
     # 获取目标序列的列名（25200-32400）
     target_columns = [col for col in data.columns if col.startswith('traffic_')]
