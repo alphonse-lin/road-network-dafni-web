@@ -1,0 +1,118 @@
+kind: M
+api_version: v1beta3
+
+metadata:
+  display_name: Dynamic Flood-Induced Traffic Congestion Risk Assessment Platform
+  name: dafni-flood-traffic-risk-platform
+  publisher: University College London
+  summary: A platform for assessing the impact of flooding on urban transportation networks and traffic congestion
+  description: >
+    A comprehensive platform for assessing the dynamic impact of flooding on urban transportation networks.
+    It integrates road networks, commuter behaviors, and flood maps to generate vulnerability indices and congestion risk maps.
+
+    The platform employs a four-layer methodology: data context, computation, integration, and evaluation,
+    providing a holistic approach to understanding how flooding affects traffic congestion.
+    
+    Key outputs include road vulnerability indices, traffic flow patterns, and network topology metrics that
+    help decision-makers identify critical infrastructure and plan effective flood response strategies.
+
+  contact_point_name: Qiuchen Lu, Xuhui Lin
+  contact_point_email: qiuchen.lu@ucl.ac.uk, zczlxl3@ucl.ac.uk
+  licence: https://creativecommons.org/licenses/by/4.0/
+  rights: open
+  subject: Transportation
+  project_name: DAFNI-IMPACT
+  project_url: https://www.dafni.ac.uk/impact/
+  funding: DAFNI Sandpit Project-IMPACT
+
+spec:
+  command: ["python", "/app/app.py"]
+  inputs:
+    parameters:
+      - name: RADIUS
+        title: Calculation Radius
+        description: The radius to use for context-based centrality calculations (meters)
+        type: integer
+        default: 100
+        required: true
+        min: 50
+        max: 1000
+
+      - name: FLOOD_THRESHOLD
+        title: Flood Threshold
+        description: Threshold for road inundation depth to be considered flooded (meters)
+        type: number
+        default: 0.3
+        required: true
+        min: 0.1
+        max: 1.0
+        
+      - name: AGENT_COUNT
+        title: Simulation Agent Count
+        description: Number of agents to simulate in transportation model
+        type: integer
+        default: 1000
+        required: false
+        min: 100
+        max: 10000
+
+    dataslots:
+      - name: Road Network
+        description: GeoJSON file containing road network topology and attributes
+        path: inputs/roadnetwork
+        required: false
+        
+      - name: Flood Maps
+        description: Zip file containing time series of flood depth and extent
+        path: inputs/floodmaps
+        required: false
+        
+      - name: Buildings
+        description: GeoJSON file containing building data for activity generation
+        path: inputs/buildings
+        required: false
+
+  outputs:
+    datasets:
+      - name: road_vulnerability_index.csv
+        type: csv
+        description: Final vulnerability scores for road segments based on flood impact, network importance, and traffic flow
+      
+      - name: depth_sequenced_flooded_roads.csv
+        type: csv
+        description: Time-sequenced flood depth data for affected road segments
+      
+      - name: flag_sequenced_flooded_roads.csv
+        type: csv
+        description: Binary flags indicating flooded status of road segments over time
+      
+      - name: processed_traffic_data.csv
+        type: csv
+        description: Traffic flow data for each road link at regular time intervals
+      
+      - name: processed_topology_data.csv
+        type: csv
+        description: Spatial topology metrics (Multi-Centrality values) at different times
+      
+      - name: merged_output.csv
+        type: csv
+        description: Combined dataset with all metrics for further analysis
+      
+      - name: traffic_flow_450s.csv
+        type: csv
+        description: Detailed traffic flows resampled to 450-second intervals
+      
+      - name: dtw_matching_result.csv
+        type: csv
+        description: Dynamic time warping results for pattern matching between flood and traffic data
+      
+      - name: out_network_h_0.geojson
+        type: json
+        description: Road network with calculated spatial topology metrics in GeoJSON format
+
+  resources:
+    use_gpu: false
+    readiness_probe:
+      scheme: HTTP
+      path: /health
+      port: 8080 

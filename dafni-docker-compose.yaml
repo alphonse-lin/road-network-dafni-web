@@ -1,0 +1,23 @@
+version: '3'
+
+services:
+  frontend:
+    image: dafni-frontend:latest
+    restart: always
+    environment:
+      - VUE_APP_API_URL=http://backend:5000
+    ports:
+      - "80:8080"
+    depends_on:
+      - backend
+
+  backend:
+    image: dafni-backend:latest
+    restart: always
+    environment:
+      - FLASK_ENV=production
+    volumes:
+      - ./input:/app/data/input
+      - ./output:/app/data/output
+    ports:
+      - "5000:5000" 

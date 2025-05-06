@@ -218,7 +218,7 @@ const handleFileUpload = async (event) => {
         }
         reader.readAsText(file)
 
-        const response = await axios.post('http://localhost:5000/api/upload-building', formData)
+        const response = await axios.post('/api/upload-building', formData)
         
         if (response.data.success) {
             buildings.value = true

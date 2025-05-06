@@ -1,0 +1,51 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# 安装Node.js
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    wget \
+    apt-transport-https \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装.NET运行时
+RUN wget https://packages.microsoft.com/config/debian/11/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
+    && dpkg -i packages-microsoft-prod.deb \
+    && rm packages-microsoft-prod.deb \
+    && apt-get update \
+    && apt-get install -y dotnet-runtime-6.0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建目录结构
+RUN mkdir -p /app/frontend /app/backend /app/data /app/data/input /app/data/output
+
+# 复制前端代码
+COPY frontend/ /app/frontend/
+WORKDIR /app/frontend
+RUN npm install && npm run build
+
+# 复制后端代码
+COPY backend/ /app/backend/
+WORKDIR /app/backend
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 确保exe文件有执行权限
+RUN find /app -name "*.exe" -exec chmod +x {} \;
+
+# 复制启动脚本
+COPY start_dafni.sh /app/
+RUN chmod +x /app/start_dafni.sh
+
+# 设置工作目录
+WORKDIR /app
+
+# 暴露端口
+EXPOSE 80
+
+# 启动命令
+CMD ["/app/start_dafni.sh"] 

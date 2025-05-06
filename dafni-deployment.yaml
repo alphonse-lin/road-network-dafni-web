@@ -1,0 +1,32 @@
+kind: Deployment
+api_version: v1beta3
+metadata:
+  name: dafni-flood-traffic-risk-platform-deployment
+  display_name: DAFNI Flood Traffic Risk Platform Deployment
+  description: Deployment configuration for the DAFNI Flood Traffic Risk Platform
+spec:
+  model_name: dafni-flood-traffic-risk-platform
+  model_version: 1.0.0
+  parameters:
+    RADIUS: "100"
+    FLOOD_THRESHOLD: 0.3
+    AGENT_COUNT: 1000
+    SIMULATION_PERIODS: ["morningPeak", "offPeak", "eveningPeak"]
+  datasets:
+    roadnetwork:
+      dataset_id: "sample_road_network"  # 替换为实际的数据集ID
+      version: "latest"
+    floodmaps:
+      dataset_id: "sample_flood_maps"    # 替换为实际的数据集ID
+      version: "latest"
+    buildings:
+      dataset_id: "sample_buildings"     # 替换为实际的数据集ID
+      version: "latest"
+  environment:
+    FLASK_ENV: "production"
+    DEBUG: "false"
+  resources:
+    memory: 16GB
+    cpu: 8
+    storage: 20GB
+  visualization_url: "/app" 

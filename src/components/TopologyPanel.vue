@@ -156,7 +156,7 @@ import 'element-plus/es/components/message/style/css'
 // 引入 proj4 进行坐标转换
 import proj4 from 'proj4'
 import { v4 as uuidv4 } from 'uuid'
-import axios from 'axios'
+import axios from '@/utils/axios'
 import CalculationProgress from './CalculationProgress.vue'
 
 // 添加 projectId ref
@@ -267,7 +267,7 @@ const uploadFiles = async () => {
             formData.append('inundation', zipFile.value)
         }
 
-        const response = await axios.post('http://localhost:5000/api/upload', formData, {
+        const response = await axios.post('/api/upload', formData, {
             headers: {
                 'Content-Type': 'multipart/form-data'
             }

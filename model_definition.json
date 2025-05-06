@@ -151,7 +151,7 @@
         "name": "dafni-frontend",
         "ports": [8080],
         "environment": {
-          "VUE_APP_API_URL": "http://localhost:5000"
+          "VUE_APP_API_URL": "http://backend:5000"
         }
       },
       "backend": {
