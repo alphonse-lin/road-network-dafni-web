@@ -1,0 +1,180 @@
+{
+  "modelName": "DAFNI-FloodTrafficRiskPlatform",
+  "version": "1.0.0",
+  "description": "Dynamic Human-centred Flood-Induced Traffic Congestion Risk Assessment Platform",
+  "authors": [
+    "Xuhui Lin",
+    "Prof. QiuChen Lu",
+    "Prof. Tao Cheng",
+    "more authors coming soon"
+  ],
+  "institutions": [
+    "University College London, UK",
+    "City University of Hong Kong, CN"
+  ],
+  "layers": {
+    "dataContextLayer": {
+      "description": "Integration of road networks, commuter behaviors, and flood maps",
+      "components": [
+        {
+          "name": "roadNetwork",
+          "type": "spatial",
+          "dataFormat": "geoJSON",
+          "required": true,
+          "description": "Road network topology and attributes"
+        },
+        {
+          "name": "floodMaps",
+          "type": "spatial-temporal",
+          "dataFormat": "raster",
+          "required": true,
+          "description": "Time series of flood depth and extent"
+        },
+        {
+          "name": "commuterData",
+          "type": "demographic",
+          "dataFormat": "CSV",
+          "required": true,
+          "description": "Commuter behaviors and travel patterns"
+        },
+        {
+          "name": "landUse",
+          "type": "spatial",
+          "dataFormat": "geoJSON",
+          "required": false,
+          "description": "Land use and building function data"
+        }
+      ]
+    },
+    "computationLayer": {
+      "description": "Processing of network importance and flood impacts",
+      "components": [
+        {
+          "name": "contextBasedCentrality",
+          "type": "algorithm",
+          "inputs": ["roadNetwork", "commuterData"],
+          "outputs": ["staticCentralityMeasures"],
+          "description": "Calculation of context-based betweenness centrality as static indicator"
+        },
+        {
+          "name": "dynamicExposureAnalysis",
+          "type": "algorithm",
+          "inputs": ["roadNetwork", "floodMaps"],
+          "outputs": ["exposureFlagSeries"],
+          "description": "Generation of dynamic exposure flag series tracking flood impacts"
+        }
+      ]
+    },
+    "integrationLayer": {
+      "description": "Synthesis of computations into analytical streams",
+      "components": [
+        {
+          "name": "topologicalAnalysis",
+          "type": "process",
+          "inputs": ["staticCentralityMeasures", "exposureFlagSeries"],
+          "outputs": ["dynamicCentralitySeries"],
+          "description": "Analysis of changes in network topology during flooding"
+        },
+        {
+          "name": "trafficDemandAnalysis",
+          "type": "simulation",
+          "inputs": ["roadNetwork", "commuterData", "exposureFlagSeries"],
+          "outputs": ["trafficDemandSeries"],
+          "parameters": {
+            "simulationEngine": "MATSim",
+            "floodThreshold": 0.3,
+            "timeSteps": "hourly",
+            "simulationPeriods": ["morningPeak", "offPeak", "eveningPeak"]
+          },
+          "description": "Simulation of traffic flow and demand under flooding conditions"
+        }
+      ]
+    },
+    "evaluationLayer": {
+      "description": "Generation of vulnerability indices and risk maps",
+      "components": [
+        {
+          "name": "vulnerabilityAssessment",
+          "type": "analysis",
+          "inputs": ["dynamicCentralitySeries", "trafficDemandSeries"],
+          "outputs": ["vulnerabilityIndexSeries"],
+          "method": "DynamicTimeWarping",
+          "description": "Measurement of network susceptibility to disruption"
+        },
+        {
+          "name": "congestionRiskMapping",
+          "type": "visualization",
+          "inputs": ["vulnerabilityIndexSeries", "roadNetwork"],
+          "outputs": ["congestionRiskMaps"],
+          "riskLevels": [
+            "lowest", 
+            "low", 
+            "high", 
+            "highest"
+          ],
+          "description": "Visualization of evolving congestion risk patterns"
+        }
+      ]
+    }
+  },
+  "userInterface": {
+    "components": [
+      {
+        "name": "homePage",
+        "type": "interface",
+        "functionality": "areaSelection",
+        "description": "Interface for selecting study area"
+      },
+      {
+        "name": "topologicalAnalysisView",
+        "type": "visualization",
+        "dataSource": "dynamicCentralitySeries",
+        "description": "Visualization of betweenness centrality"
+      },
+      {
+        "name": "trafficSystemView",
+        "type": "visualization",
+        "dataSource": "trafficDemandSeries",
+        "description": "Visualization of traffic demand simulation"
+      },
+      {
+        "name": "evaluationIndicesView",
+        "type": "visualization",
+        "dataSource": ["vulnerabilityIndexSeries", "congestionRiskMaps"],
+        "description": "Display of vulnerability and congestion risk maps"
+      }
+    ]
+  },
+  "deploymentSettings": {
+    "dockerImages": {
+      "frontend": {
+        "name": "dafni-frontend",
+        "ports": [8080],
+        "environment": {
+          "VUE_APP_API_URL": "http://localhost:5000"
+        }
+      },
+      "backend": {
+        "name": "dafni-backend",
+        "ports": [5000],
+        "volumes": ["./data:/app/data"],
+        "environment": {
+          "FLASK_ENV": "production"
+        }
+      }
+    },
+    "computationalRequirements": {
+      "minimumRAM": "8GB",
+      "recommendedRAM": "16GB",
+      "minimumCPU": "4 cores",
+      "recommendedCPU": "8 cores",
+      "gpuAcceleration": false,
+      "diskSpace": "20GB"
+    }
+  },
+  "futureEnhancements": [
+    "Real-time sensor data integration",
+    "Multimodal transportation analysis",
+    "Automated response recommendations"
+  ]
+} 

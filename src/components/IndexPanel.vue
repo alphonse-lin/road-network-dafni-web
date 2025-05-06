@@ -120,7 +120,7 @@ import { ref } from 'vue'
 import { ElCheckbox, ElSlider, ElButton, ElMessage, ElTooltip } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
 import CalculationProgress from './CalculationProgress.vue'
-import axios from 'axios'
+import axios from '@/utils/axios'
 
 const props = defineProps({
     projectId: {
@@ -141,8 +141,7 @@ const emit = defineEmits(['close', 'vulnerabilityCalculation', 'riskCalculation'
 const handleCheckFiles = async () => {
     try {
         console.log('Checking files for project:', props.projectId)
-        // const response = await axios.get(`http://localhost:5000/api/check-files-2/${props.projectId}`)
-        const response = await axios.get(`http://localhost:5000/api/check-files-2/${props.projectId}`)
+        const response = await axios.get(`/api/check-files-2/${props.projectId}`)
         const { hasTopologyCalculation, hasMatsimCalculation, hasMergedData } = response.data
         
         if (hasTopologyCalculation && hasMatsimCalculation && hasMergedData) {

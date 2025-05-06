@@ -48,7 +48,7 @@
 <script setup>
 import { ref, defineProps, defineEmits, watch, computed, onBeforeUnmount, provide } from 'vue'
 import { ElDialog, ElMessage } from 'element-plus'
-import axios from 'axios'
+import axios from '@/utils/axios'
 import { useTopologyStore } from '@/stores/topology'
 
 const props = defineProps({
@@ -144,7 +144,7 @@ const executeCalculation = async () => {
 
         for (const step of calculationSteps.value) {
             statusMessage.value = `Processing ${step.title.toLowerCase()}`
-            const response = await axios.post(`http://localhost:5000${step.endpoint}`, {
+            const response = await axios.post(`${step.endpoint}`, {
                 task_id: props.projectId,
                 radii: props.radius?.toString() || '100'
             })

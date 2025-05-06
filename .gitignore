@@ -34,3 +34,4 @@ backend/prepare/matsim_preparation_jar/config.xml
 /data
 /src/assets/sample_data/debug
 /src/assets/sample_data
+*.tar

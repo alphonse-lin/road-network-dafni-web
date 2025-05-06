@@ -83,7 +83,7 @@
             <span>120</span>
         </div>
     </div>
-    <!-- <div v-if="mapStore.showVulnerabilityLegend" class="vulnerability-legend">
+    <div v-if="mapStore.showVulnerabilityLegend" class="vulnerability-legend">
         <h4>Vulnerability Index</h4>
         <div class="vulnerability-gradient"></div>
         <div class="vulnerability-labels">
@@ -91,8 +91,8 @@
             <span>Medium</span>
             <span>High</span>
         </div>
-    </div> -->
-    <!-- <div v-if="mapStore.showRiskLegend" class="risk-legend">
+    </div>
+    <div v-if="mapStore.showRiskLegend" class="risk-legend">
         <h4>Risk Level</h4>
         <div class="risk-colors">
             <div v-for="(color, level) in riskColors" :key="level" class="risk-color-item">
@@ -100,7 +100,7 @@
                 <span>{{ level }}</span>
             </div>
         </div>
-    </div> -->
+    </div>
     </template>
     
     <script>
@@ -1521,8 +1521,8 @@
 
     .vulnerability-legend {
         position: fixed;
-        right: 20px;
-        bottom: 20px;
+        left: 480px;
+        bottom: 30px;
         background: rgba(255, 255, 255, 0.95);
         padding: 10px;
         border-radius: 8px;
@@ -1551,8 +1551,8 @@
 
     .risk-legend {
         position: fixed;
-        right: 20px;
-        bottom: 20px;
+        left: 480px;
+        bottom: 30px;
         background: rgba(255, 255, 255, 0.95);
         padding: 10px;
         border-radius: 8px;

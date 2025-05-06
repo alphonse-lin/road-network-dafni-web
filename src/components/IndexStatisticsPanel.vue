@@ -594,7 +594,7 @@ const initRiskCharts = async () => {
 
 const loadStatistics = async () => {
     try {
-        const response = await axios.get(`http://localhost:5000/api/vulnerability/statistics`, {
+        const response = await axios.get(`/api/vulnerability/statistics`, {
             params: {
                 project_id: props.projectId
             }

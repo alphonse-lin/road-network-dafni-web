@@ -161,7 +161,7 @@ import { InfoFilled } from '@element-plus/icons-vue'
 import 'element-plus/es/components/checkbox/style/css'
 import 'element-plus/es/components/slider/style/css'
 import 'element-plus/es/components/button/style/css'
-import axios from 'axios'
+import axios from '@/utils/axios'
 import CalculationProgress from './CalculationProgress.vue'
 
 // 文件预览复选框状态
@@ -233,7 +233,7 @@ const handleFileUpload = async (event) => {
 // 在组件挂载时检查已有文件状态
 onMounted(async () => {
     try {
-        const response = await axios.get(`http://localhost:5000/api/check-files/${props.projectId}`)
+        const response = await axios.get(`/api/check-files/${props.projectId}`)
         roadNetworks.value = response.data.hasRoadNetworks
         inundationMap.value = response.data.hasInundationMap
         buildings.value = response.data.hasBuildings
